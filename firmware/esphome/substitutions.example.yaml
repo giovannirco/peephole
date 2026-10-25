@@ -1,0 +1,13 @@
+# Private build: copy to a file outside the repo (or to substitutions.local.yaml, which is gitignored)
+# and compile with it as a package so the board boots with Wi-Fi and the hub URL already set:
+#
+#   packages:
+#     base: !include peephole-tdisplay-s3.yaml
+#   substitutions:
+#     name: peephole-desk
+#     hub_url: https://peephole.example.com
+#   wifi:
+#     ssid: !secret wifi_ssid
+#     password: !secret wifi_password
+#
+# Everything else comes from the generic file.

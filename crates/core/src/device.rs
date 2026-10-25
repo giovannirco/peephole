@@ -152,22 +152,17 @@ impl Registry {
         if page_names.is_empty() {
             return Some(0);
         }
-        if let Some(h) = &d.hold {
-            if h.until > now {
-                if let Some(i) = page_names.iter().position(|n| n == &h.page) {
-                    return Some(i);
-                }
-            }
+        if let Some(h) = d.hold.as_ref().filter(|h| h.until > now)
+            && let Some(i) = page_names.iter().position(|n| n == &h.page)
+        {
+            return Some(i);
         }
         let mut page = d.page.min(page_names.len() - 1);
         let mut since = d.page_since;
-        if d.cycle_s > 0 {
-            let elapsed = (now - d.page_since).num_seconds().max(0) as u64;
-            let steps = elapsed / d.cycle_s;
-            if steps > 0 {
-                page = (page + steps as usize) % page_names.len();
-                since = d.page_since + Duration::seconds((steps * d.cycle_s) as i64);
-            }
+        let elapsed = (now - d.page_since).num_seconds().max(0) as u64;
+        if let Some(steps) = elapsed.checked_div(d.cycle_s).filter(|s| *s > 0) {
+            page = (page + steps as usize) % page_names.len();
+            since = d.page_since + Duration::seconds((steps * d.cycle_s) as i64);
         }
         if page != d.page || since != d.page_since || d.hold.is_some() {
             self.update(id, |d| {

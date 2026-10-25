@@ -14,13 +14,14 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 async-trait.workspace = true
 futures.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["net"] }
 tracing.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 reqwest.workspace = true
 image.workspace = true
 tokio-tungstenite.workspace = true
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 
 [dev-dependencies]
 wiremock.workspace = true

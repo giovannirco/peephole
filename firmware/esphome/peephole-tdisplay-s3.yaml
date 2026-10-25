@@ -1,0 +1,294 @@
+# Peephole firmware for the LilyGo T-Display-S3 (ESP32-S3, 8 MB PSRAM, 16 MB flash, 320x170 ST7789).
+# The board is a thin client: it fetches a PNG frame from the hub every ${refresh} and shows it.
+# Wi-Fi is provisioned over USB with Improv (the hub's /flash page does it); the hub URL is a
+# text entity on the board's own web page (http://<board>/). A private build can preset both
+# through a package that adds wifi credentials and overrides `hub_url` (see README).
+substitutions:
+  name: peephole
+  friendly_name: Peephole
+  hub_url: ""
+  refresh: 5s
+  width: "320"
+  height: "170"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: true
+  min_version: 2026.10.0
+  project:
+    name: giovannirco.peephole
+    version: 0.1.0
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    advanced:
+      flash_chip: winbond
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+wifi:
+  ap:
+    ssid: ${friendly_name}
+
+improv_serial:
+
+captive_portal:
+
+web_server:
+  port: 80
+  version: 3
+
+ota:
+  - platform: esphome
+
+time:
+  - platform: sntp
+    id: ntp
+    servers:
+      - pool.ntp.org
+      - time.cloudflare.com
+
+http_request:
+  verify_ssl: true
+  timeout: 8s
+  watchdog_timeout: 30s
+  buffer_size_tx: 1024
+  buffer_size_rx: 2048
+
+globals:
+  - id: frame_ok
+    type: bool
+    initial_value: "false"
+  - id: frame_fails
+    type: int
+    initial_value: "0"
+
+text:
+  - platform: template
+    id: hub_url
+    name: Hub URL
+    icon: mdi:server-network
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ${hub_url}
+    min_length: 0
+    max_length: 200
+    on_value:
+      then:
+        - lambda: id(frame_fails) = 0;
+        - script.execute: fetch_frame
+
+image:
+  - platform: online_image
+    id: frame
+    url: http://127.0.0.1/frame.png
+    format: PNG
+    type: RGB565
+    update_interval: never
+    on_download_finished:
+      then:
+        - lambda: |-
+            id(frame_ok) = true;
+            id(frame_fails) = 0;
+        - component.update: screen
+    on_error:
+      then:
+        - lambda: |-
+            id(frame_fails) += 1;
+            if (id(frame_fails) >= 3) id(frame_ok) = false;
+            ESP_LOGW("frame", "download failed (%d in a row)", id(frame_fails));
+        - component.update: screen
+
+script:
+  - id: fetch_frame
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: return wifi::global_wifi_component->is_connected() && !id(hub_url).state.empty();
+          then:
+            - online_image.set_url:
+                id: frame
+                url: !lambda |-
+                  return id(hub_url).state + "/frame.png?id=" + get_mac_address() + "&w=${width}&h=${height}";
+  - id: hub_action
+    mode: queued
+    parameters:
+      action: string
+    then:
+      - if:
+          condition:
+            lambda: return !id(hub_url).state.empty();
+          then:
+            - http_request.post:
+                url: !lambda return id(hub_url).state + "/api/devices/" + get_mac_address() + "/" + action;
+                request_headers:
+                  Content-Length: "0"
+                on_response:
+                  then:
+                    - script.execute: fetch_frame
+                on_error:
+                  then:
+                    - logger.log:
+                        level: WARN
+                        tag: hub
+                        format: "action failed"
+
+interval:
+  - interval: ${refresh}
+    then:
+      - script.execute: fetch_frame
+
+spi:
+  type: octal
+  clk_pin: 8
+  data_pins:
+    - 39
+    - 40
+    - 41
+    - 42
+    - number: 45
+      ignore_strapping_warning: true
+    - number: 46
+      ignore_strapping_warning: true
+    - 47
+    - 48
+
+output:
+  - platform: ledc
+    frequency: 2000
+    pin: GPIO38
+    id: backlight_output
+
+light:
+  - platform: monochromatic
+    output: backlight_output
+    name: Backlight
+    id: backlight
+    restore_mode: ALWAYS_ON
+    default_transition_length: 0s
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO0
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: Button top
+    on_click:
+      min_length: 30ms
+      max_length: 600ms
+      then:
+        - script.execute:
+            id: hub_action
+            action: next
+    on_multi_click:
+      - timing:
+          - ON for at least 900ms
+        then:
+          - light.toggle: backlight
+  - platform: gpio
+    pin:
+      number: GPIO14
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: Button bottom
+    on_click:
+      min_length: 30ms
+      max_length: 600ms
+      then:
+        - script.execute:
+            id: hub_action
+            action: prev
+    on_multi_click:
+      - timing:
+          - ON for at least 900ms
+        then:
+          - light.toggle: backlight
+  - platform: status
+    name: Status
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi signal
+    id: wifi_rssi
+    update_interval: 60s
+  - platform: uptime
+    name: Uptime
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP
+      id: ip_addr
+  - platform: template
+    name: Device id
+    lambda: return {get_mac_address()};
+    update_interval: 300s
+
+button:
+  - platform: restart
+    name: Restart
+  - platform: template
+    name: Refresh frame
+    on_press:
+      - script.execute: fetch_frame
+
+font:
+  - file: {type: gfonts, family: Roboto, weight: 700}
+    id: f_title
+    size: 22
+    bpp: 4
+  - file: {type: gfonts, family: Roboto, weight: 400}
+    id: f_body
+    size: 12
+    bpp: 4
+
+color:
+  - {id: c_bg, hex: 0B0E14}
+  - {id: c_card, hex: 151A23}
+  - {id: c_edge, hex: 232A36}
+  - {id: c_text, hex: E6E9EF}
+  - {id: c_text2, hex: 8A93A5}
+  - {id: c_accent, hex: 22D3EE}
+
+display:
+  - platform: mipi_spi
+    id: screen
+    model: T-DISPLAY-S3
+    rotation: 270
+    update_interval: never
+    lambda: |-
+      if (id(frame_ok)) {
+        it.image(0, 0, id(frame));
+        return;
+      }
+      it.fill(id(c_bg));
+      it.filled_rectangle(6, 6, it.get_width() - 12, it.get_height() - 12, id(c_card));
+      it.rectangle(6, 6, it.get_width() - 12, it.get_height() - 12, id(c_edge));
+      it.filled_rectangle(6, 6, 3, it.get_height() - 12, id(c_accent));
+      it.print(18, 14, id(f_title), id(c_text), "Peephole");
+      std::string hub = id(hub_url).state;
+      std::string l1 = hub.empty() ? "No hub URL set" : "Hub: " + hub;
+      std::string l2 = hub.empty() ? "Open http://" + id(ip_addr).state + "/ and set it" : "No frame yet (" + std::to_string(id(frame_fails)) + " failures)";
+      std::string l3 = "IP " + id(ip_addr).state + "   RSSI " + std::to_string((int) id(wifi_rssi).state) + " dBm";
+      std::string l4 = "id " + get_mac_address();
+      it.print(18, 50, id(f_body), id(c_text2), l1.c_str());
+      it.print(18, 70, id(f_body), id(c_text2), l2.c_str());
+      it.print(18, 100, id(f_body), id(c_text2), l3.c_str());
+      it.print(18, 120, id(f_body), id(c_text2), l4.c_str());

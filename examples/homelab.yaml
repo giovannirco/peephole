@@ -1,0 +1,303 @@
+# Peephole: a whole homelab on a 320x170 screen. Thirteen pages fed by Prometheus
+# (kube-state-metrics, node exporter, a Proxmox exporter, UnPoller, nvidia-smi, blackbox probes,
+# Velero, CloudNativePG, a Cloudflare exporter) and a mempool.space-compatible API.
+# Names (clusters, hosts, zones) are placeholders: rename the `items` and `rename` maps to yours.
+# Env: PROMETHEUS_URL (…/prometheus), MEMPOOL_URL, PEEPHOLE_TZ.
+hub:
+  title: Homelab
+  cycle_s: 12
+  stale_s: 600
+
+plugins:
+  - kind: clock
+    tz: ${PEEPHOLE_TZ:-UTC}
+
+  - kind: mempool
+    name: btc
+    url: ${MEMPOOL_URL}
+    interval_s: 60
+
+  - kind: prometheus
+    name: p
+    url: ${PROMETHEUS_URL}
+    interval_s: 60
+    timeout_s: 15
+    queries:
+      # AI gateway quota (ratios 0–1) and usage
+      - {key: claude5h, expr: 'min(cliproxy_quota_remaining_ratio{provider="claude",window="five_hour"})'}
+      - {key: claude7d, expr: 'min(cliproxy_quota_remaining_ratio{provider="claude",window="seven_day"})'}
+      - {key: fable7d, expr: 'min(cliproxy_quota_remaining_ratio{provider="claude",window=~".*fable.*|seven_day_opus"})'}
+      - {key: codex5h, expr: 'min(cliproxy_quota_remaining_ratio{provider="codex",window="five_hour"})'}
+      - {key: codex7d, expr: 'min(cliproxy_quota_remaining_ratio{provider="codex",window=~"seven_day|weekly"})'}
+      - {key: xai7d, expr: 'min(cliproxy_quota_remaining_ratio{provider="xai",window="weekly"})'}
+      - {key: aireq, expr: 'sum by (provider) (increase(cliproxy_requests_total[24h]))', label: provider}
+      - {key: aitok, expr: 'sum by (provider) (increase(cliproxy_tokens_total[24h]))', label: provider}
+      - {key: ai_req_hourly, expr: 'sum(rate(cliproxy_requests_total[1h])) * 3600', range: {span_s: 86400, step_s: 3600}}
+      - {key: alerts, expr: 'sum(grafana_alerting_alertmanager_alerts{state="active"})'}
+      # Websites (Cloudflare exporter)
+      - {key: req24h, expr: 'sum by (zone) (sum_over_time(cloudflare_zone_requests[24h:1h]))', label: zone}
+      - {key: uniq24h, expr: 'sum by (zone) (sum_over_time(cloudflare_zone_uniques[24h:1h]))', label: zone}
+      - {key: threats, expr: 'sum by (zone) (cloudflare_zone_threats)', label: zone}
+      - {key: tunnels_up, expr: 'sum(cloudflare_tunnel_up)'}
+      - {key: tunnels, expr: 'count(cloudflare_tunnel_up)'}
+      - {key: web_req_hourly, expr: 'sum(cloudflare_zone_requests)', range: {span_s: 86400, step_s: 3600}}
+      # Bitcoin node (exporter next to bitcoind)
+      - {key: node_blocks, expr: 'max(bitcoin_blocks)'}
+      - {key: node_peers, expr: 'max(bitcoin_peers)'}
+      - {key: node_mempool, expr: 'max(bitcoin_mempool_size)'}
+      # Kubernetes clusters (kube-state-metrics with a `cluster` label)
+      - {key: ready, expr: 'sum by (cluster) (kube_node_status_condition{condition="Ready",status="true"})', label: cluster}
+      - {key: nodes, expr: 'count by (cluster) (kube_node_info)', label: cluster}
+      - {key: pods, expr: 'sum by (cluster) (kube_pod_status_phase{phase="Running"})', label: cluster}
+      - {key: badpods, expr: 'sum by (cluster) (kube_pod_status_phase{phase=~"Pending|Failed|Unknown"})', label: cluster}
+      - {key: mem, expr: '1 - sum by (cluster) (node_memory_MemAvailable_bytes{cluster!~"nas|proxmox"}) / sum by (cluster) (node_memory_MemTotal_bytes{cluster!~"nas|proxmox"})', label: cluster}
+      - {key: badpods_hourly, expr: 'sum(kube_pod_status_phase{phase=~"Pending|Failed|Unknown"})', range: {span_s: 86400, step_s: 3600}}
+      # Proxmox hosts (pve exporter)
+      - {key: hcpu, expr: 'max by (instance) (pve_cpu_usage_ratio{id=~"node/.*"})', label: instance}
+      - {key: hmem, expr: 'max by (instance) (pve_memory_usage_bytes{id=~"node/.*"}) / max by (instance) (pve_memory_size_bytes{id=~"node/.*"})', label: instance}
+      - {key: hnvme, expr: 'max by (instance) (pve_nvme_temperature_celsius)', label: instance}
+      - {key: huptime, expr: 'max by (instance) (pve_uptime_seconds{id=~"node/.*"})', label: instance}
+      - {key: hguests, expr: 'count by (instance) (pve_up{id=~"(qemu|lxc)/.*"} == 1)', label: instance}
+      - {key: hzfs, expr: 'min by (instance) (pve_zfs_pool_free_bytes / pve_zfs_pool_size_bytes)', label: instance}
+      - {key: hcpu_1h, expr: 'max by (instance) (pve_cpu_usage_ratio{id=~"node/.*"})', label: instance, range: {span_s: 3600, step_s: 120}}
+      # GPU node (nvidia-smi exporter; the uuid label's first four characters name the card)
+      # `rename` maps the first four characters of each card's uuid to a name used in the pages
+      - {key: gtemp, expr: 'label_replace(nvidia_smi_temperature_gpu, "card", "$1", "uuid", "(....).*")', label: card, rename: {aaaa: card-a, bbbb: card-b}}
+      - {key: gpower, rename: {aaaa: card-a, bbbb: card-b}, expr: 'label_replace(nvidia_smi_power_draw_watts, "card", "$1", "uuid", "(....).*")', label: card}
+      - {key: gplimit, rename: {aaaa: card-a, bbbb: card-b}, expr: 'label_replace(nvidia_smi_power_limit_watts, "card", "$1", "uuid", "(....).*")', label: card}
+      - {key: gutil, rename: {aaaa: card-a, bbbb: card-b}, expr: 'label_replace(nvidia_smi_utilization_gpu_ratio, "card", "$1", "uuid", "(....).*")', label: card}
+      - {key: gvram, rename: {aaaa: card-a, bbbb: card-b}, expr: 'label_replace(nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes, "card", "$1", "uuid", "(....).*")', label: card}
+      - {key: gtemp_1h, expr: 'label_replace(nvidia_smi_temperature_gpu, "card", "$1", "uuid", "(....).*")', label: card, rename: {aaaa: card-a, bbbb: card-b}, range: {span_s: 3600, step_s: 120}}
+      # Network (UnPoller + blackbox)
+      - {key: wan_lat, expr: 'max(unpoller_device_wan_latency_seconds) * 1000'}
+      - {key: wan_rx, expr: 'max(unpoller_device_wan_receive_rate_bytes)'}
+      - {key: wan_tx, expr: 'max(unpoller_device_wan_transmit_rate_bytes)'}
+      - {key: wan_rx_1h, expr: 'max(unpoller_device_wan_receive_rate_bytes)', range: {span_s: 3600, step_s: 120}}
+      - {key: wan_tx_1h, expr: 'max(unpoller_device_wan_transmit_rate_bytes)', range: {span_s: 3600, step_s: 120}}
+      - {key: clients_lan, expr: 'sum(unpoller_site_users{subsystem="lan"})'}
+      - {key: clients_wlan, expr: 'sum(unpoller_site_users{subsystem="wlan"})'}
+      - {key: aps, expr: 'sum(unpoller_site_aps)'}
+      - {key: switches, expr: 'sum(unpoller_site_switches)'}
+      - {key: drops24h, expr: 'sum(increase(unpoller_site_intenet_drops_total[24h]))'}
+      - {key: tunnel, expr: 'probe_success{job="tunnels"}', label: tunnel}
+      - {key: site, expr: 'probe_success{job="sites"}', label: device}
+      # Probes
+      - {key: machines_up, expr: 'count(probe_success{job="machines"} == 1)'}
+      - {key: machines, expr: 'count(probe_success{job="machines"})'}
+      - {key: machine, expr: 'probe_success{job="machines"}', label: machine}
+      - {key: services_up, expr: 'count(probe_success{job="services"} == 1)'}
+      - {key: services, expr: 'count(probe_success{job="services"})'}
+      - {key: nas_up, expr: 'count(probe_success{job="nas"} == 1)'}
+      - {key: nas, expr: 'count(probe_success{job="nas"})'}
+      - {key: checks_bad, expr: 'count(homelab_checks_ok == 0) or vector(0)'}
+      - {key: waha, expr: 'waha_api_up', label: server}
+      - {key: msgs24h, expr: 'sum by (session) (increase(waha_messages_total{fromMe="false"}[24h]))', label: session}
+      - {key: wa_hourly, expr: 'sum(rate(waha_messages_total{fromMe="false"}[1h])) * 3600', range: {span_s: 86400, step_s: 3600}}
+      # Storage (NAS node exporter, MinIO)
+      - {key: vol_used, expr: 'label_replace(1 - node_filesystem_avail_bytes{cluster="nas",mountpoint=~"/volume[0-9]"} / node_filesystem_size_bytes{cluster="nas",mountpoint=~"/volume[0-9]"}, "vol", "$1", "mountpoint", "/(volume[0-9])")', label: vol}
+      - {key: vol_free, expr: 'label_replace(node_filesystem_avail_bytes{cluster="nas",mountpoint=~"/volume[0-9]"}, "vol", "$1", "mountpoint", "/(volume[0-9])")', label: vol}
+      - {key: bucket, expr: 'topk(4, nas_minio_bucket_used_bytes / nas_minio_bucket_quota_bytes)', label: bucket}
+      # Backups: age in seconds
+      - {key: velero_age, expr: 'time() - max by (cluster) (velero_backup_last_successful_timestamp{schedule="velero-daily"})', label: cluster}
+      - {key: cnpg_age, expr: 'time() - min by (cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)', label: cluster}
+      - {key: vzdump_age, expr: 'time() - max by (node) (pve_backup_last_run_timestamp_seconds)', label: node}
+
+pages:
+  - name: overview
+    title: Overview
+    header: false
+    cards:
+      - {x: 6, y: 6, w: 118, h: 58, widgets: [
+          {kind: text, x: 8, y: 2, text: "{{clock/time}}", font: clock},
+          {kind: text, x: 8, y: 44, text: "{{clock/date}}", font: small, color: text2}]}
+      - {x: 130, y: 6, w: 184, h: 58, accent: ai, widgets: [
+          {kind: gauge, x: 30, y: 46, r: 17, bind: p/claude5h, label: claude 5h, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 92, y: 46, r: 17, bind: p/claude7d, label: claude 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 154, y: 46, r: 17, bind: p/codex7d, label: codex 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}}]}
+      - {x: 6, y: 70, w: 206, h: 76, accent: bitcoin, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: btc/price_usd, label: BTC · USD, fmt: thousands, color: bitcoin},
+          {kind: kpi, x: 120, y: 4, bind: btc/tip_height, label: block, fmt: thousands, size: mid},
+          {kind: kpi, x: 120, y: 36, bind: btc/fee_fast, label: fast fee, unit: sat/vB, fmt: int, size: mid},
+          {kind: spark, x: 8, y: 48, w: 100, h: 22, bind: btc/price_24h, color: bitcoin}]}
+      - {x: 218, y: 70, w: 96, h: 76, accent: bad, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: p/alerts, label: alerts firing, fmt: int, thresholds: {warn: 0.5, bad: 5}},
+          {kind: kpi, x: 8, y: 42, bind: p/machines_up, label: machines up, fmt: int, size: mid}]}
+      - {x: 6, y: 150, w: 308, h: 16, widgets: [{kind: ticker, x: 6, y: 1, w: 296, color: text2}]}
+
+  - name: ai
+    title: AI quota
+    cards:
+      - {x: 6, y: 24, w: 308, h: 70, accent: ai, widgets: [
+          {kind: gauge, x: 30, y: 52, r: 18, bind: p/claude5h, label: claude 5h, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 92, y: 52, r: 18, bind: p/claude7d, label: claude 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 154, y: 52, r: 18, bind: p/fable7d, label: fable 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 216, y: 52, r: 18, bind: p/codex7d, label: codex 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 278, y: 52, r: 18, bind: p/xai7d, label: xai week, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}}]}
+      - {x: 6, y: 100, w: 150, h: 64, accent: ai, title: requests · 24 h, widgets: [
+          {kind: rows, x: 8, y: 16, w: 134, row_h: 14, items: [{key: claude}, {key: codex}, {key: xai}],
+           cols: [{kind: name, w: 50}, {kind: num, bind: "p/aireq/{}", w: 40, fmt: int}, {kind: num, bind: "p/aitok/{}", w: 40, fmt: auto, unit: tok}]}]}
+      - {x: 162, y: 100, w: 152, h: 64, accent: ai, title: requests per hour, widgets: [
+          {kind: bars, x: 8, y: 16, w: 136, h: 40, bind: p/ai_req_hourly, color: ai}]}
+
+  - name: websites
+    title: Websites
+    cards:
+      - {x: 6, y: 24, w: 190, h: 140, accent: web, widgets: [
+          {kind: rows, x: 8, y: 6, w: 174, row_h: 22, items: [{key: example.com, name: example}, {key: blog.example.com, name: blog}, {key: shop.example.com, name: shop}, {key: app.example.com, name: app}],
+           cols: [{kind: name, w: 56}, {kind: num, bind: "p/req24h/{}", w: 44, fmt: auto, unit: req}, {kind: num, bind: "p/uniq24h/{}", w: 40, fmt: auto, unit: vis}, {kind: num, bind: "p/threats/{}", w: 24, fmt: int, thresholds: {warn: 0.5, bad: 10}}]}]}
+      - {x: 202, y: 24, w: 112, h: 60, accent: web, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: p/tunnels_up, label: tunnels up, fmt: int, size: mid},
+          {kind: kpi, x: 64, y: 4, bind: p/tunnels, label: of, fmt: int, size: mid}]}
+      - {x: 202, y: 90, w: 112, h: 74, accent: web, title: all sites · per hour, widgets: [
+          {kind: bars, x: 8, y: 16, w: 96, h: 50, bind: p/web_req_hourly, color: web}]}
+
+  - name: bitcoin
+    title: Bitcoin
+    cards:
+      - {x: 6, y: 24, w: 160, h: 70, accent: bitcoin, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: btc/price_usd, label: USD, fmt: thousands, color: bitcoin},
+          {kind: kpi, x: 96, y: 4, bind: btc/price_eur, label: EUR, fmt: thousands, size: mid},
+          {kind: kpi, x: 96, y: 34, bind: btc/price_brl, label: BRL, fmt: thousands, size: mid},
+          {kind: spark, x: 8, y: 46, w: 80, h: 18, bind: btc/price_24h, color: bitcoin}]}
+      - {x: 172, y: 24, w: 142, h: 70, accent: bitcoin, title: fees · sat/vB, widgets: [
+          {kind: kpi, x: 8, y: 16, bind: btc/fee_fast, label: fast, fmt: int, size: mid},
+          {kind: kpi, x: 52, y: 16, bind: btc/fee_half_hour, label: 30 min, fmt: int, size: mid},
+          {kind: kpi, x: 96, y: 16, bind: btc/fee_hour, label: 1 h, fmt: int, size: mid},
+          {kind: kpi, x: 8, y: 44, bind: btc/mempool_count, label: mempool tx, fmt: auto, size: mid},
+          {kind: kpi, x: 80, y: 44, bind: btc/mempool_vsize, label: vsize, fmt: bytes, size: mid}]}
+      - {x: 6, y: 100, w: 160, h: 64, accent: bitcoin, title: node, widgets: [
+          {kind: kpi, x: 8, y: 16, bind: p/node_blocks, label: height, fmt: thousands, size: mid},
+          {kind: kpi, x: 80, y: 16, bind: p/node_peers, label: peers, fmt: int, size: mid, thresholds: {warn: 8, bad: 3, invert: true}},
+          {kind: kpi, x: 8, y: 42, bind: btc/tip_height, label: network tip, fmt: thousands, size: mid}]}
+      - {x: 172, y: 100, w: 142, h: 64, accent: bitcoin, title: difficulty, widgets: [
+          {kind: gauge, x: 30, y: 56, r: 16, bind: btc/difficulty_progress, label: epoch, color: bitcoin},
+          {kind: kpi, x: 60, y: 14, bind: btc/difficulty_change, label: next change, unit: "%", fmt: dec1, size: mid},
+          {kind: kpi, x: 60, y: 40, bind: btc/remaining_blocks, label: blocks left, fmt: int, size: mid}]}
+
+  - name: clusters
+    title: Clusters
+    cards:
+      - {x: 6, y: 24, w: 206, h: 140, accent: net, widgets: [
+          {kind: rows, x: 8, y: 4, w: 190, row_h: 22, items: [{key: cluster-a}, {key: cluster-b}, {key: cluster-c}, {key: cluster-d}, {key: cluster-e}, {key: cluster-f}],
+           cols: [{kind: led, bind: "p/ready/{}"}, {kind: name, w: 62}, {kind: num, bind: "p/nodes/{}", w: 18, fmt: int}, {kind: num, bind: "p/pods/{}", w: 30, fmt: int}, {kind: bar, bind: "p/mem/{}", w: 56, color: net, thresholds: {warn: 0.8, bad: 0.9}}]}]}
+      - {x: 218, y: 24, w: 96, h: 140, accent: bad, title: bad pods · 24 h, widgets: [
+          {kind: spark, x: 8, y: 20, w: 80, h: 40, bind: p/badpods_hourly, color: bad},
+          {kind: kpi, x: 8, y: 70, bind: p/alerts, label: alerts firing, fmt: int, thresholds: {warn: 0.5, bad: 5}}]}
+
+  - name: hosts
+    title: Proxmox hosts
+    cards:
+      - {x: 6, y: 24, w: 100, h: 140, accent: web, title: host-a, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 15, bind: p/hcpu/host-a, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 15, bind: p/hmem/host-a, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 8, y: 64, bind: p/hnvme/host-a, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: kpi, x: 54, y: 64, bind: p/hguests/host-a, label: guests, fmt: int, size: mid},
+          {kind: spark, x: 8, y: 98, w: 84, h: 20, bind: p/hcpu_1h/host-a, color: web}]}
+      - {x: 110, y: 24, w: 100, h: 140, accent: web, title: host-b, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 15, bind: p/hcpu/host-b, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 15, bind: p/hmem/host-b, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 8, y: 64, bind: p/hnvme/host-b, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: kpi, x: 54, y: 64, bind: p/hguests/host-b, label: guests, fmt: int, size: mid},
+          {kind: spark, x: 8, y: 98, w: 84, h: 20, bind: p/hcpu_1h/host-b, color: web}]}
+      - {x: 214, y: 24, w: 100, h: 140, accent: web, title: host-c, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 15, bind: p/hcpu/host-c, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 15, bind: p/hmem/host-c, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 8, y: 64, bind: p/hnvme/host-c, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: kpi, x: 54, y: 64, bind: p/hguests/host-c, label: guests, fmt: int, size: mid},
+          {kind: spark, x: 8, y: 98, w: 84, h: 20, bind: p/hcpu_1h/host-c, color: web}]}
+
+  - name: gpu
+    title: GPU node
+    cards:
+      - {x: 6, y: 24, w: 152, h: 140, accent: ai, title: card 0, widgets: [
+          {kind: kpi, x: 8, y: 16, bind: p/gtemp/card-a, label: temperature, fmt: temp, thresholds: {warn: 70, bad: 78}},
+          {kind: kpi, x: 90, y: 16, bind: p/gpower/card-a, label: power, unit: W, fmt: int, size: mid},
+          {kind: gauge, x: 30, y: 100, r: 16, bind: p/gutil/card-a, label: util, color: ai},
+          {kind: gauge, x: 80, y: 100, r: 16, bind: p/gvram/card-a, label: vram, color: ai},
+          {kind: spark, x: 104, y: 72, w: 40, h: 30, bind: p/gtemp_1h/card-a, color: ai}]}
+      - {x: 162, y: 24, w: 152, h: 140, accent: ai, title: card 1, widgets: [
+          {kind: kpi, x: 8, y: 16, bind: p/gtemp/card-b, label: temperature, fmt: temp, thresholds: {warn: 70, bad: 78}},
+          {kind: kpi, x: 90, y: 16, bind: p/gpower/card-b, label: power, unit: W, fmt: int, size: mid},
+          {kind: gauge, x: 30, y: 100, r: 16, bind: p/gutil/card-b, label: util, color: ai},
+          {kind: gauge, x: 80, y: 100, r: 16, bind: p/gvram/card-b, label: vram, color: ai},
+          {kind: spark, x: 104, y: 72, w: 40, h: 30, bind: p/gtemp_1h/card-b, color: ai}]}
+
+  - name: network
+    title: Network
+    cards:
+      - {x: 6, y: 24, w: 150, h: 64, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: p/wan_rx, label: WAN down, fmt: bytes, unit: "/s", color: net},
+          {kind: spark, x: 8, y: 42, w: 134, h: 16, bind: p/wan_rx_1h, color: net}]}
+      - {x: 162, y: 24, w: 152, h: 64, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: p/wan_tx, label: WAN up, fmt: bytes, unit: "/s", color: net},
+          {kind: spark, x: 8, y: 42, w: 136, h: 16, bind: p/wan_tx_1h, color: net}]}
+      - {x: 6, y: 94, w: 150, h: 70, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: p/wan_lat, label: latency, fmt: dec1, unit: ms, size: mid, thresholds: {warn: 30, bad: 80}},
+          {kind: kpi, x: 60, y: 4, bind: p/clients_lan, label: wired, fmt: int, size: mid},
+          {kind: kpi, x: 104, y: 4, bind: p/clients_wlan, label: wifi, fmt: int, size: mid},
+          {kind: kpi, x: 8, y: 36, bind: p/aps, label: APs, fmt: int, size: mid},
+          {kind: kpi, x: 60, y: 36, bind: p/switches, label: switches, fmt: int, size: mid},
+          {kind: kpi, x: 104, y: 36, bind: p/drops24h, label: drops 24h, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 10}}]}
+      - {x: 162, y: 94, w: 152, h: 70, accent: net, title: remote site, widgets: [
+          {kind: dots, x: 8, y: 20, per_row: 4, bind: "p/site/{}", label: devices, items: [{key: site-ap}, {key: site-dvr}]},
+          {kind: dots, x: 8, y: 44, per_row: 4, bind: "p/tunnel/{}", label: tunnels, items: [{key: site-b}, {key: site-c}]}]}
+
+  - name: probes
+    title: Probes
+    cards:
+      - {x: 6, y: 24, w: 100, h: 66, accent: ok, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: p/machines_up, label: machines up, fmt: int},
+          {kind: kpi, x: 60, y: 4, bind: p/machines, label: of, fmt: int, size: mid}]}
+      - {x: 110, y: 24, w: 100, h: 66, accent: ok, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: p/services_up, label: services up, fmt: int},
+          {kind: kpi, x: 60, y: 4, bind: p/services, label: of, fmt: int, size: mid}]}
+      - {x: 214, y: 24, w: 100, h: 66, accent: ok, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: p/nas_up, label: NAS probes, fmt: int},
+          {kind: kpi, x: 60, y: 4, bind: p/checks_bad, label: checks bad, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
+      - {x: 6, y: 96, w: 308, h: 68, accent: ok, widgets: [
+          {kind: dots, x: 8, y: 6, per_row: 12, bind: "p/machine/{}", label: machines,
+           items: [{key: host-a}, {key: host-b}, {key: host-c}, {key: gpu-node}, {key: nas}, {key: router}, {key: switch-1}, {key: switch-2}, {key: switch-3}, {key: ap-1}, {key: ap-2}, {key: nvr}]},
+          {kind: dots, x: 8, y: 36, per_row: 4, bind: "p/waha/{}", label: whatsapp, items: [{key: line-a}, {key: line-b}, {key: line-c}]}]}
+
+  - name: storage
+    title: Storage
+    cards:
+      - {x: 6, y: 24, w: 160, h: 140, accent: web, title: NAS volumes, widgets: [
+          {kind: hbar, x: 8, y: 22, w: 140, bind: p/vol_used/volume1, label: volume1, color: web, thresholds: {warn: 0.85, bad: 0.95}},
+          {kind: hbar, x: 8, y: 50, w: 140, bind: p/vol_used/volume2, label: volume2, color: web, thresholds: {warn: 0.85, bad: 0.95}},
+          {kind: hbar, x: 8, y: 78, w: 140, bind: p/vol_used/volume4, label: volume4, color: web, thresholds: {warn: 0.85, bad: 0.95}},
+          {kind: text, x: 8, y: 108, text: "free {{p/vol_free/volume1|bytes}} · {{p/vol_free/volume2|bytes}} · {{p/vol_free/volume4|bytes}}", font: small, color: text2}]}
+      - {x: 172, y: 24, w: 142, h: 140, accent: web, title: fullest buckets, widgets: [
+          {kind: rows, x: 8, y: 18, w: 126, row_h: 26, items: [{key: bucket-a}, {key: bucket-b}, {key: bucket-c}, {key: bucket-d}],
+           cols: [{kind: name, w: 60}, {kind: bar, bind: "p/bucket/{}", w: 56, color: web, thresholds: {warn: 0.8, bad: 0.9}}]}]}
+
+  - name: backups
+    title: Backups
+    cards:
+      - {x: 6, y: 24, w: 206, h: 140, accent: ok, title: clusters · age of last good backup, widgets: [
+          {kind: rows, x: 8, y: 18, w: 190, row_h: 20, items: [{key: cluster-a}, {key: cluster-b}, {key: cluster-c}, {key: cluster-d}, {key: cluster-e}, {key: cluster-f}],
+           cols: [{kind: name, w: 70}, {kind: num, bind: "p/velero_age/{}", w: 56, fmt: duration, unit: velero, thresholds: {warn: 108000, bad: 180000}}, {kind: num, bind: "p/cnpg_age/{}", w: 56, fmt: duration, unit: pg, thresholds: {warn: 108000, bad: 180000}}]}]}
+      - {x: 218, y: 24, w: 96, h: 140, accent: ok, title: vzdump, widgets: [
+          {kind: rows, x: 8, y: 18, w: 80, row_h: 24, items: [{key: host-a}, {key: host-b}, {key: host-c}],
+           cols: [{kind: name, w: 36}, {kind: num, bind: "p/vzdump_age/{}", w: 40, fmt: duration, thresholds: {warn: 108000, bad: 180000}}]}]}
+
+  - name: whatsapp
+    title: WhatsApp · AI usage
+    cards:
+      - {x: 6, y: 24, w: 150, h: 140, accent: ok, title: messages · 24 h, widgets: [
+          {kind: rows, x: 8, y: 18, w: 134, row_h: 22, items: [{key: line-a}, {key: line-b}, {key: line-c}],
+           cols: [{kind: led, bind: "p/waha/{}"}, {kind: name, w: 50}, {kind: num, bind: "p/msgs24h/{}", w: 50, fmt: int}]},
+          {kind: bars, x: 8, y: 92, w: 134, h: 36, bind: p/wa_hourly, color: ok}]}
+      - {x: 162, y: 24, w: 152, h: 140, accent: ai, title: AI tokens · 24 h, widgets: [
+          {kind: rows, x: 8, y: 18, w: 136, row_h: 22, items: [{key: claude}, {key: codex}, {key: xai}],
+           cols: [{kind: name, w: 50}, {kind: num, bind: "p/aitok/{}", w: 70, fmt: auto, unit: tok}]},
+          {kind: bars, x: 8, y: 92, w: 136, h: 36, bind: p/ai_req_hourly, color: ai}]}
+
+  - name: message
+    title: Message
+    cards:
+      - {x: 6, y: 24, w: 308, h: 140, widgets: [
+          {kind: text, x: 10, y: 8, text: "{{clock/time}}", font: clock},
+          {kind: text, x: 10, y: 56, text: "{{clock/date}}", font: mid, color: text2},
+          {kind: ticker, x: 10, y: 86, w: 288},
+          {kind: text, x: 10, y: 116, text: "prometheus {{p/_ok|int}} · mempool {{btc/_ok|int}} · alerts {{p/alerts|int}}", font: small, color: muted}]}

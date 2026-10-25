@@ -1,0 +1,153 @@
+# Peephole demo: no network, synthetic values that wobble a little every poll.
+# Run: PEEPHOLE_DEMO=1 PEEPHOLE_CONFIG=examples/demo.yaml peephole   → http://localhost:8080/
+hub:
+  title: Peephole demo
+  cycle_s: 10
+  stale_s: 300
+
+plugins:
+  - kind: clock
+    tz: ${PEEPHOLE_TZ:-UTC}
+  - kind: demo
+    name: d
+    interval_s: 5
+    values:
+      btc_usd: 97213
+      btc_block: 925411
+      btc_fee: 4
+      btc_24h: [96100, 96300, 96050, 96800, 97100, 96900, 97250, 97400, 97000, 97150, 97300, 97213]
+      claude5h: 0.82
+      claude7d: 0.61
+      codex7d: 0.44
+      xai7d: 0.93
+      alerts: 2
+      req_hourly: [120, 90, 70, 60, 55, 80, 140, 260, 310, 290, 330, 400, 380, 360, 420, 450, 410, 390, 350, 300, 260, 220, 180, 150]
+      ready/alpha: 1
+      ready/beta: 1
+      ready/gamma: 0
+      nodes/alpha: 3
+      nodes/beta: 2
+      nodes/gamma: 1
+      pods/alpha: 212
+      pods/beta: 96
+      pods/gamma: 31
+      mem/alpha: 0.71
+      mem/beta: 0.88
+      mem/gamma: 0.52
+      cpu/host-a: 0.23
+      cpu/host-b: 0.61
+      cpu/host-c: 0.12
+      hmem/host-a: 0.74
+      hmem/host-b: 0.91
+      hmem/host-c: 0.48
+      nvme/host-a: 47
+      nvme/host-b: 68
+      nvme/host-c: 39
+      cpu1h/host-a: [0.2, 0.25, 0.22, 0.3, 0.28, 0.21, 0.19, 0.24, 0.27, 0.23]
+      cpu1h/host-b: [0.5, 0.55, 0.7, 0.62, 0.58, 0.66, 0.71, 0.6, 0.59, 0.61]
+      cpu1h/host-c: [0.1, 0.12, 0.09, 0.14, 0.11, 0.1, 0.13, 0.12, 0.1, 0.12]
+      wan_rx: 18400000
+      wan_tx: 2300000
+      wan_rx_1h: [12e6, 14e6, 11e6, 19e6, 22e6, 18e6, 17e6, 21e6, 16e6, 18.4e6]
+      wan_tx_1h: [2e6, 2.2e6, 1.9e6, 2.5e6, 2.1e6, 2.4e6, 2.3e6, 2.6e6, 2.2e6, 2.3e6]
+      wan_lat: 0.011
+      clients: 64
+      up/router: 1
+      up/switch-1: 1
+      up/switch-2: 1
+      up/ap-1: 1
+      up/ap-2: 0
+      up/nas: 1
+      up/host-a: 1
+      up/host-b: 1
+      gpu_temp: 61
+      gpu_util: 0.37
+      gpu_vram: 0.55
+      gpu_power: 182
+      message: "Peephole: a tiny window into your homelab · every page is a frame rendered by the hub"
+
+pages:
+  - name: overview
+    title: Overview
+    header: false
+    cards:
+      - {x: 6, y: 6, w: 150, h: 60, widgets: [
+          {kind: text, x: 10, y: 4, text: "{{clock/time}}", font: clock},
+          {kind: text, x: 10, y: 46, text: "{{clock/date}}", font: small, color: text2}]}
+      - {x: 162, y: 6, w: 152, h: 60, accent: ai, title: AI quota, widgets: [
+          {kind: gauge, x: 28, y: 50, r: 18, bind: d/claude5h, label: 5h, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 76, y: 50, r: 18, bind: d/claude7d, label: 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 124, y: 50, r: 18, bind: d/codex7d, label: codex, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}}]}
+      - {x: 6, y: 72, w: 200, h: 72, accent: bitcoin, widgets: [
+          {kind: kpi, x: 10, y: 6, bind: d/btc_usd, label: BTC, unit: USD, fmt: thousands, color: bitcoin},
+          {kind: kpi, x: 120, y: 6, bind: d/btc_fee, label: fee, unit: sat/vB, fmt: int, size: mid},
+          {kind: kpi, x: 120, y: 36, bind: d/btc_block, label: block, fmt: thousands, size: mid},
+          {kind: spark, x: 10, y: 46, w: 100, h: 20, bind: d/btc_24h, color: bitcoin}]}
+      - {x: 212, y: 72, w: 102, h: 72, accent: bad, widgets: [
+          {kind: kpi, x: 10, y: 6, bind: d/alerts, label: firing alerts, fmt: int, thresholds: {warn: 0.5, bad: 5}}]}
+      - {x: 6, y: 150, w: 308, h: 16, widgets: [
+          {kind: ticker, x: 6, y: 1, w: 296, bind: d/message, color: text2}]}
+
+  - name: clusters
+    title: Clusters
+    cards:
+      - {x: 6, y: 24, w: 308, h: 140, accent: net, widgets: [
+          {kind: rows, x: 10, y: 8, w: 290, row_h: 24,
+           items: [{key: alpha}, {key: beta}, {key: gamma}],
+           cols: [{kind: led, bind: "d/ready/{}"}, {kind: name, w: 70},
+                  {kind: num, bind: "d/nodes/{}", w: 30, fmt: int, unit: n},
+                  {kind: num, bind: "d/pods/{}", w: 50, fmt: int, unit: pods},
+                  {kind: bar, bind: "d/mem/{}", w: 90, color: net, thresholds: {warn: 0.8, bad: 0.9}}]}]}
+
+  - name: hosts
+    title: Hosts
+    cards:
+      - {x: 6, y: 24, w: 100, h: 140, accent: web, title: host-a, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 16, bind: d/cpu/host-a, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 16, bind: d/hmem/host-a, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 10, y: 66, bind: d/nvme/host-a, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: spark, x: 10, y: 100, w: 80, h: 22, bind: d/cpu1h/host-a, color: web}]}
+      - {x: 110, y: 24, w: 100, h: 140, accent: web, title: host-b, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 16, bind: d/cpu/host-b, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 16, bind: d/hmem/host-b, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 10, y: 66, bind: d/nvme/host-b, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: spark, x: 10, y: 100, w: 80, h: 22, bind: d/cpu1h/host-b, color: web}]}
+      - {x: 214, y: 24, w: 100, h: 140, accent: web, title: host-c, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 16, bind: d/cpu/host-c, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 16, bind: d/hmem/host-c, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 10, y: 66, bind: d/nvme/host-c, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: spark, x: 10, y: 100, w: 80, h: 22, bind: d/cpu1h/host-c, color: web}]}
+
+  - name: network
+    title: Network
+    cards:
+      - {x: 6, y: 24, w: 150, h: 66, accent: net, widgets: [
+          {kind: kpi, x: 10, y: 6, bind: d/wan_rx, label: WAN down, fmt: bytes, unit: "/s", color: net},
+          {kind: spark, x: 10, y: 42, w: 130, h: 18, bind: d/wan_rx_1h, color: net}]}
+      - {x: 162, y: 24, w: 152, h: 66, accent: net, widgets: [
+          {kind: kpi, x: 10, y: 6, bind: d/wan_tx, label: WAN up, fmt: bytes, unit: "/s", color: net},
+          {kind: spark, x: 10, y: 42, w: 130, h: 18, bind: d/wan_tx_1h, color: net}]}
+      - {x: 6, y: 96, w: 150, h: 68, accent: net, widgets: [
+          {kind: kpi, x: 10, y: 6, bind: d/wan_lat, label: latency, fmt: dec1, unit: ms, size: mid},
+          {kind: kpi, x: 80, y: 6, bind: d/clients, label: clients, fmt: int, size: mid}]}
+      - {x: 162, y: 96, w: 152, h: 68, accent: net, widgets: [
+          {kind: dots, x: 10, y: 8, per_row: 8, bind: "d/up/{}", label: devices,
+           items: [{key: router}, {key: switch-1}, {key: switch-2}, {key: ap-1}, {key: ap-2}, {key: nas}, {key: host-a}, {key: host-b}]}]}
+
+  - name: requests
+    title: Requests per hour
+    cards:
+      - {x: 6, y: 24, w: 308, h: 140, accent: web, widgets: [
+          {kind: bars, x: 10, y: 10, w: 288, h: 110, bind: d/req_hourly, color: web}]}
+
+  - name: gpu
+    title: GPU
+    cards:
+      - {x: 6, y: 24, w: 150, h: 140, accent: ai, title: card 0, widgets: [
+          {kind: kpi, x: 10, y: 20, bind: d/gpu_temp, label: temperature, fmt: temp, thresholds: {warn: 70, bad: 80}},
+          {kind: gauge, x: 36, y: 110, r: 18, bind: d/gpu_util, label: util, color: ai},
+          {kind: gauge, x: 100, y: 110, r: 18, bind: d/gpu_vram, label: vram, color: ai}]}
+      - {x: 162, y: 24, w: 152, h: 140, accent: ai, widgets: [
+          {kind: kpi, x: 10, y: 20, bind: d/gpu_power, label: power, unit: W, fmt: int},
+          {kind: hbar, x: 10, y: 80, w: 130, bind: d/gpu_util, label: util, color: ai},
+          {kind: hbar, x: 10, y: 104, w: 130, bind: d/gpu_vram, label: vram, color: ai}]}
