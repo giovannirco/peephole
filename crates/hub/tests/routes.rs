@@ -1,0 +1,408 @@
+use std::path::PathBuf;
+
+use axum::Router;
+use axum::body::{Body, Bytes};
+use axum::http::{HeaderMap, Method, Request, StatusCode};
+use http_body_util::BodyExt;
+use peephole_core::{Config, Registry, Store, Value};
+use peephole_hub::routes::router;
+use peephole_hub::settings::Settings;
+use peephole_hub::state::{AppState, Hub};
+use serde_json::{Value as Json, json};
+use tower::ServiceExt;
+
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+const CONFIG: &str = r#"
+hub: {title: Test hub, cycle_s: 0, stale_s: 60}
+plugins:
+  - kind: clock
+  - kind: demo
+    name: d
+pages:
+  - name: alpha
+    title: Alpha
+    cards: [{x: 0, y: 0, w: 100, h: 50}]
+  - name: beta
+"#;
+
+fn settings(demo: bool, firmware_dir: Option<PathBuf>, public_url: Option<&str>) -> Settings {
+    Settings {
+        config: None,
+        listen: "127.0.0.1:0".parse().unwrap(),
+        demo,
+        state_file: None,
+        firmware_dir,
+        public_url: public_url.map(str::to_owned),
+    }
+}
+
+fn hub_with(settings: Settings, yaml: &str) -> AppState {
+    let cfg = Config::parse(yaml, |_| None).unwrap();
+    let registry = Registry::new(cfg.hub.cycle_s);
+    Hub::new(&settings, cfg, Store::new(), registry)
+}
+
+fn hub(demo: bool) -> AppState {
+    hub_with(settings(demo, None, None), CONFIG)
+}
+
+async fn call(app: &Router, method: Method, uri: &str, body: Option<Json>) -> (StatusCode, HeaderMap, Bytes) {
+    let mut req = Request::builder().method(method).uri(uri);
+    let body = match body {
+        Some(b) => {
+            req = req.header("content-type", "application/json");
+            Body::from(b.to_string())
+        }
+        None => Body::empty(),
+    };
+    let resp = app.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    (status, headers, bytes)
+}
+
+async fn get(app: &Router, uri: &str) -> (StatusCode, HeaderMap, Bytes) {
+    call(app, Method::GET, uri, None).await
+}
+
+async fn post(app: &Router, uri: &str, body: Option<Json>) -> (StatusCode, Json) {
+    let (status, _, bytes) = call(app, Method::POST, uri, body).await;
+    (status, serde_json::from_slice(&bytes).unwrap_or(Json::Null))
+}
+
+fn json_of(bytes: &Bytes) -> Json {
+    serde_json::from_slice(bytes).unwrap_or_else(|e| panic!("not JSON ({e}): {}", String::from_utf8_lossy(bytes)))
+}
+
+fn png_size(bytes: &[u8]) -> (u32, u32) {
+    assert_eq!(bytes[..8], PNG_SIGNATURE, "not a PNG");
+    let w = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+    let h = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+    (w, h)
+}
+
+fn header<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
+    headers.get(name).unwrap_or_else(|| panic!("missing header {name}")).to_str().unwrap()
+}
+
+async fn register(app: &Router, id: &str) {
+    let (status, _, _) = get(app, &format!("/frame.png?id={id}")).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn healthz_counts_plugins_devices_and_pages() {
+    let app = router(hub(false));
+    register(&app, "m1").await;
+    let (status, _, body) = get(&app, "/healthz").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json_of(&body), json!({"ok": true, "plugins": 2, "devices": 1, "pages": 2}));
+}
+
+#[tokio::test]
+async fn frame_registers_the_device_and_returns_a_png_of_the_requested_size() {
+    let app = router(hub(false));
+    let (status, headers, body) = get(&app, "/frame.png?id=m1&w=64&h=32").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(header(&headers, "content-type"), "image/png");
+    assert_eq!(header(&headers, "cache-control"), "no-store");
+    assert_eq!(header(&headers, "x-peephole-page"), "alpha");
+    assert_eq!(png_size(&body), (64, 32));
+    let (_, _, body) = get(&app, "/api/devices/m1").await;
+    let dev = json_of(&body);
+    assert_eq!(dev["width"], 64);
+    assert_eq!(dev["frames"], 1);
+}
+
+#[tokio::test]
+async fn frame_defaults_to_320_by_170() {
+    let app = router(hub(false));
+    let (_, _, body) = get(&app, "/frame.png?id=m1").await;
+    assert_eq!(png_size(&body), (320, 170));
+}
+
+#[tokio::test]
+async fn frame_requires_an_id_and_sane_dimensions() {
+    let app = router(hub(false));
+    for uri in
+        ["/frame.png", "/frame.png?id=", "/frame.png?id=m&w=0", "/frame.png?id=m&w=100000", "/frame.png?id=m&h=x"]
+    {
+        let (status, _, body) = get(&app, uri).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+        assert!(json_of(&body)["error"].is_string(), "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn frame_without_pages_serves_a_notice() {
+    let app = router(hub_with(settings(false, None, None), "hub: {title: Empty}\n"));
+    let (status, headers, body) = get(&app, "/frame.png?id=m1").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(header(&headers, "x-peephole-page"), "notice");
+    assert_eq!(png_size(&body), (320, 170));
+}
+
+#[tokio::test]
+async fn next_twice_wraps_back_to_the_first_page() {
+    let app = router(hub(false));
+    register(&app, "m1").await;
+    let (status, dev) = post(&app, "/api/devices/m1/next", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dev["page"], 1);
+    let (_, headers, _) = get(&app, "/frame.png?id=m1").await;
+    assert_eq!(header(&headers, "x-peephole-page"), "beta");
+    let (_, dev) = post(&app, "/api/devices/m1/next", None).await;
+    assert_eq!(dev["page"], 0);
+}
+
+#[tokio::test]
+async fn prev_wraps_to_the_last_page() {
+    let app = router(hub(false));
+    register(&app, "m1").await;
+    let (status, dev) = post(&app, "/api/devices/m1/prev", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dev["page"], 1);
+}
+
+#[tokio::test]
+async fn set_page_by_name_and_unknown_page_is_404() {
+    let app = router(hub(false));
+    register(&app, "m1").await;
+    let (status, dev) = post(&app, "/api/devices/m1/page", Some(json!({"name": "beta"}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dev["page"], 1);
+    let (status, body) = post(&app, "/api/devices/m1/page", Some(json!({"name": "nope"}))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body["error"].as_str().unwrap().contains("nope"));
+}
+
+#[tokio::test]
+async fn message_is_stored_and_over_200_chars_is_rejected() {
+    let app = router(hub(false));
+    register(&app, "m1").await;
+    let (status, dev) = post(&app, "/api/devices/m1/message", Some(json!({"text": "é".repeat(200)}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dev["message"], "é".repeat(200));
+    let (status, body) = post(&app, "/api/devices/m1/message", Some(json!({"text": "x".repeat(201)}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].is_string());
+}
+
+#[tokio::test]
+async fn name_and_cycle_update_the_device() {
+    let app = router(hub(false));
+    register(&app, "m1").await;
+    let (status, dev) = post(&app, "/api/devices/m1/name", Some(json!({"name": "Kitchen"}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dev["name"], "Kitchen");
+    let (status, dev) = post(&app, "/api/devices/m1/cycle", Some(json!({"cycle_s": 30}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dev["cycle_s"], 30);
+}
+
+#[tokio::test]
+async fn malformed_bodies_are_400_json() {
+    let app = router(hub(false));
+    register(&app, "m1").await;
+    let (status, body) = post(&app, "/api/devices/m1/message", Some(json!({"wrong": 1}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].is_string());
+}
+
+#[tokio::test]
+async fn unknown_device_is_404() {
+    let app = router(hub(false));
+    let (status, _, body) = get(&app, "/api/devices/ghost").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(json_of(&body)["error"].is_string());
+    for action in ["next", "prev"] {
+        let (status, body) = post(&app, &format!("/api/devices/ghost/{action}"), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{action}");
+        assert!(body["error"].is_string());
+    }
+    let (status, _) = post(&app, "/api/devices/ghost/message", Some(json!({"text": "hi"}))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn demo_mode_forbids_every_post() {
+    let app = router(hub(true));
+    register(&app, "m1").await;
+    for (action, body) in [
+        ("next", None),
+        ("prev", None),
+        ("page", Some(json!({"name": "beta"}))),
+        ("message", Some(json!({"text": "hi"}))),
+        ("name", Some(json!({"name": "x"}))),
+        ("cycle", Some(json!({"cycle_s": 5}))),
+    ] {
+        let (status, body) = post(&app, &format!("/api/devices/m1/{action}"), body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{action}");
+        assert!(body["error"].is_string(), "{action}");
+    }
+    let (_, _, body) = get(&app, "/api/devices/m1").await;
+    assert_eq!(json_of(&body)["page"], 0);
+}
+
+#[tokio::test]
+async fn page_png_renders_without_touching_devices() {
+    let app = router(hub(false));
+    let (status, headers, body) = get(&app, "/pages/beta.png?w=640&h=340").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(header(&headers, "content-type"), "image/png");
+    assert_eq!(png_size(&body), (640, 340));
+    let (_, _, body) = get(&app, "/api/devices").await;
+    assert_eq!(json_of(&body), json!([]));
+    let (status, _, body) = get(&app, "/pages/nope.png").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(json_of(&body)["error"].is_string());
+    let (status, _, _) = get(&app, "/pages/beta").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn api_pages_lists_each_page() {
+    let app = router(hub(false));
+    let (status, _, body) = get(&app, "/api/pages").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json_of(&body),
+        json!([
+            {"name": "alpha", "title": "Alpha", "width": 320, "height": 170, "cards": 1},
+            {"name": "beta", "title": null, "width": 320, "height": 170, "cards": 0}
+        ])
+    );
+}
+
+#[tokio::test]
+async fn api_values_summarises_the_store() {
+    let state = hub(false);
+    state.store.set("d/n", Value::Number(1.5));
+    state.store.set("d/s", Value::Series(vec![1.0, 2.0]));
+    state.store.set("d/t", Value::Text("hi".into()));
+    state.store.set("d/img", Value::Image { width: 4, height: 2, rgba: vec![0; 32].into() });
+    let app = router(state);
+    let (status, _, body) = get(&app, "/api/values").await;
+    assert_eq!(status, StatusCode::OK);
+    let v = json_of(&body);
+    assert_eq!(v["d/n"]["value"], 1.5);
+    assert_eq!(v["d/s"]["value"], json!([1.0, 2.0]));
+    assert_eq!(v["d/t"]["value"], "hi");
+    assert_eq!(v["d/img"]["value"], json!({"image": [4, 2]}));
+    assert!(v["d/n"]["updated_at"].is_string());
+    assert_eq!(v["d/n"]["age_s"], 0);
+}
+
+#[tokio::test]
+async fn api_config_describes_the_hub() {
+    let app = router(hub(true));
+    let (_, _, body) = get(&app, "/api/config").await;
+    assert_eq!(
+        json_of(&body),
+        json!({
+            "title": "Test hub", "cycle_s": 0, "stale_s": 60, "demo": true,
+            "plugins": [{"name": "clock", "kind": "clock"}, {"name": "d", "kind": "demo"}]
+        })
+    );
+}
+
+#[tokio::test]
+async fn manifest_lists_the_newest_firmware_per_board() {
+    let dir = tempfile::tempdir().unwrap();
+    for f in ["tdisplay-s3-0.9.0.factory.bin", "tdisplay-s3-0.10.0.factory.bin", "notes.txt", "other-1.0.0.factory.bin"]
+    {
+        std::fs::write(dir.path().join(f), b"fw").unwrap();
+    }
+    let app = router(hub_with(settings(false, Some(dir.path().to_path_buf()), None), CONFIG));
+    let (status, _, body) = get(&app, "/flash/manifest.json").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json_of(&body),
+        json!({
+            "name": "Peephole",
+            "version": "0.10.0",
+            "new_install_prompt_erase": true,
+            "builds": [{"chipFamily": "ESP32-S3", "parts": [{"path": "/firmware/tdisplay-s3-0.10.0.factory.bin", "offset": 0}]}]
+        })
+    );
+    let (status, _, body) = get(&app, "/firmware/tdisplay-s3-0.10.0.factory.bin").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(&body[..], b"fw");
+}
+
+#[tokio::test]
+async fn manifest_is_404_without_a_firmware_dir_or_files() {
+    let app = router(hub(false));
+    let (status, _, body) = get(&app, "/flash/manifest.json").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(json_of(&body)["error"].is_string());
+    let (status, _, body) = get(&app, "/firmware/tdisplay-s3-0.1.0.factory.bin").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(json_of(&body)["error"].is_string());
+    let empty = tempfile::tempdir().unwrap();
+    let app = router(hub_with(settings(false, Some(empty.path().to_path_buf()), None), CONFIG));
+    let (status, _, _) = get(&app, "/flash/manifest.json").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn flash_page_uses_esp_web_tools_and_shows_the_public_url() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("tdisplay-s3-0.1.0.factory.bin"), b"fw").unwrap();
+    let state =
+        hub_with(settings(false, Some(dir.path().to_path_buf()), Some("https://peephole.example.invalid")), CONFIG);
+    let app = router(state);
+    let (status, headers, body) = get(&app, "/flash/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(header(&headers, "content-type").starts_with("text/html"));
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(html.contains("https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"));
+    assert!(html.contains(r#"<esp-web-install-button manifest="/flash/manifest.json">"#));
+    assert!(html.contains("https://peephole.example.invalid"));
+    assert!(!html.contains("No firmware"));
+}
+
+#[tokio::test]
+async fn flash_page_says_when_no_firmware_is_present() {
+    let app = router(hub(false));
+    let (status, _, body) = get(&app, "/flash/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8(body.to_vec()).unwrap().contains("No firmware"));
+}
+
+#[tokio::test]
+async fn index_lists_every_page_and_marks_demo_mode() {
+    let app = router(hub(false));
+    let (status, headers, body) = get(&app, "/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(header(&headers, "content-type").starts_with("text/html"));
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(html.contains("Test hub"));
+    assert!(html.contains(r#"/pages/alpha.png?w=640&amp;h=340"#), "{html}");
+    assert!(html.contains(r#"/pages/beta.png?w=640&amp;h=340"#));
+    assert!(html.contains(r#"href="/flash/""#));
+    assert!(!html.contains(">DEMO<"));
+    let (_, _, body) = get(&router(hub(true)), "/").await;
+    assert!(String::from_utf8(body.to_vec()).unwrap().contains(">DEMO<"));
+}
+
+#[tokio::test]
+async fn index_escapes_page_names() {
+    let yaml = "hub: {title: \"<b>t</b>\"}\npages: [{name: \"a<script>\"}]\n";
+    let app = router(hub_with(settings(false, None, None), yaml));
+    let (_, _, body) = get(&app, "/").await;
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(!html.contains("a<script>"));
+    assert!(!html.contains("<b>t</b>"));
+    assert!(html.contains("a&lt;script&gt;"));
+}
+
+#[tokio::test]
+async fn unknown_routes_are_404_json() {
+    let app = router(hub(false));
+    let (status, _, body) = get(&app, "/nope").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(json_of(&body)["error"].is_string());
+}

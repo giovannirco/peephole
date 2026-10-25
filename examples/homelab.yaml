@@ -179,7 +179,7 @@ pages:
     cards:
       - {x: 6, y: 24, w: 206, h: 140, accent: net, widgets: [
           {kind: rows, x: 8, y: 4, w: 190, row_h: 22, items: [{key: cluster-a}, {key: cluster-b}, {key: cluster-c}, {key: cluster-d}, {key: cluster-e}, {key: cluster-f}],
-           cols: [{kind: led, bind: "p/ready/{}"}, {kind: name, w: 62}, {kind: num, bind: "p/nodes/{}", w: 18, fmt: int}, {kind: num, bind: "p/pods/{}", w: 30, fmt: int}, {kind: bar, bind: "p/mem/{}", w: 56, color: net, thresholds: {warn: 0.8, bad: 0.9}}]}]}
+           cols: [{kind: led, bind: "p/ready/{}"}, {kind: name, w: 66}, {kind: num, bind: "p/nodes/{}", w: 20, fmt: int}, {kind: num, bind: "p/pods/{}", w: 34, fmt: int}, {kind: bar, bind: "p/mem/{}", w: 46, color: net, thresholds: {warn: 0.8, bad: 0.9}}]}]}
       - {x: 218, y: 24, w: 96, h: 140, accent: bad, title: bad pods · 24 h, widgets: [
           {kind: spark, x: 8, y: 20, w: 80, h: 40, bind: p/badpods_hourly, color: bad},
           {kind: kpi, x: 8, y: 70, bind: p/alerts, label: alerts firing, fmt: int, thresholds: {warn: 0.5, bad: 5}}]}
@@ -190,21 +190,21 @@ pages:
       - {x: 6, y: 24, w: 100, h: 140, accent: web, title: host-a, widgets: [
           {kind: gauge, x: 26, y: 50, r: 15, bind: p/hcpu/host-a, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
           {kind: gauge, x: 70, y: 50, r: 15, bind: p/hmem/host-a, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
-          {kind: kpi, x: 8, y: 64, bind: p/hnvme/host-a, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
-          {kind: kpi, x: 54, y: 64, bind: p/hguests/host-a, label: guests, fmt: int, size: mid},
-          {kind: spark, x: 8, y: 98, w: 84, h: 20, bind: p/hcpu_1h/host-a, color: web}]}
+          {kind: kpi, x: 8, y: 72, bind: p/hnvme/host-a, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: kpi, x: 54, y: 72, bind: p/hguests/host-a, label: guests, fmt: int, size: mid},
+          {kind: spark, x: 8, y: 106, w: 84, h: 20, bind: p/hcpu_1h/host-a, color: web}]}
       - {x: 110, y: 24, w: 100, h: 140, accent: web, title: host-b, widgets: [
           {kind: gauge, x: 26, y: 50, r: 15, bind: p/hcpu/host-b, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
           {kind: gauge, x: 70, y: 50, r: 15, bind: p/hmem/host-b, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
-          {kind: kpi, x: 8, y: 64, bind: p/hnvme/host-b, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
-          {kind: kpi, x: 54, y: 64, bind: p/hguests/host-b, label: guests, fmt: int, size: mid},
-          {kind: spark, x: 8, y: 98, w: 84, h: 20, bind: p/hcpu_1h/host-b, color: web}]}
+          {kind: kpi, x: 8, y: 72, bind: p/hnvme/host-b, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: kpi, x: 54, y: 72, bind: p/hguests/host-b, label: guests, fmt: int, size: mid},
+          {kind: spark, x: 8, y: 106, w: 84, h: 20, bind: p/hcpu_1h/host-b, color: web}]}
       - {x: 214, y: 24, w: 100, h: 140, accent: web, title: host-c, widgets: [
           {kind: gauge, x: 26, y: 50, r: 15, bind: p/hcpu/host-c, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
           {kind: gauge, x: 70, y: 50, r: 15, bind: p/hmem/host-c, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
-          {kind: kpi, x: 8, y: 64, bind: p/hnvme/host-c, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
-          {kind: kpi, x: 54, y: 64, bind: p/hguests/host-c, label: guests, fmt: int, size: mid},
-          {kind: spark, x: 8, y: 98, w: 84, h: 20, bind: p/hcpu_1h/host-c, color: web}]}
+          {kind: kpi, x: 8, y: 72, bind: p/hnvme/host-c, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: kpi, x: 54, y: 72, bind: p/hguests/host-c, label: guests, fmt: int, size: mid},
+          {kind: spark, x: 8, y: 106, w: 84, h: 20, bind: p/hcpu_1h/host-c, color: web}]}
 
   - name: gpu
     title: GPU node

@@ -65,6 +65,7 @@ impl Registry {
     /// Register or refresh a device at `now`; returns its current state.
     pub fn touch(&self, id: &str, width: u32, height: u32, now: DateTime<Utc>) -> Device {
         let mut map = self.inner.write().expect("registry poisoned");
+        let is_new = !map.contains_key(id);
         let d = map.entry(id.to_owned()).or_insert_with(|| Device {
             id: id.to_owned(),
             name: None,
@@ -85,7 +86,9 @@ impl Registry {
         d.frames += 1;
         let out = d.clone();
         drop(map);
-        self.persist();
+        if is_new {
+            self.persist();
+        }
         out
     }
 

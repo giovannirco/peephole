@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 description = "Peephole hub: renders frames for tiny screens, serves the web UI and the flash page"
 
+[lib]
+name = "peephole_hub"
+path = "src/lib.rs"
+
 [[bin]]
 name = "peephole"
 path = "src/main.rs"
@@ -26,3 +30,6 @@ tower-http.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"

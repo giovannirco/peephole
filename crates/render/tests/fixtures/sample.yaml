@@ -1,0 +1,201 @@
+hub:
+  title: Sample
+pages:
+  - name: overview
+    header: false
+    cards:
+      - x: 0
+        y: 0
+        w: 320
+        h: 44
+        widgets:
+          - {kind: text, x: 4, y: -5, text: "{{clock/time}}", font: clock}
+          - {kind: text, x: 316, y: 2, text: "{{clock/date}}", font: mid, color: text2, align: right}
+          - {kind: text, x: 316, y: 24, text: "{{alerts/count|int}} alerts · {{alerts/count|age}}", color: bad, align: right}
+      - x: 4
+        y: 46
+        w: 194
+        h: 70
+        accent: bitcoin
+        widgets:
+          - {kind: kpi, x: 8, y: 4, bind: btc/price_usd, label: "BTC · USD", fmt: thousands, color: bitcoin}
+          - {kind: spark, x: 122, y: 8, w: 64, h: 36, bind: btc/price_24h}
+          - {kind: text, x: 8, y: 50, text: "block {{btc/height|thousands}} · {{btc/fee}} sat/vB", color: text2}
+      - x: 204
+        y: 46
+        w: 112
+        h: 70
+        accent: ai
+        title: AI quota
+        widgets:
+          - {kind: gauge, x: 22, y: 40, r: 15, bind: ai/claude5h, label: 5h, thresholds: {warn: 0.4, bad: 0.15, invert: true}}
+          - {kind: gauge, x: 56, y: 40, r: 15, bind: ai/claude7d, label: 7d, thresholds: {warn: 0.4, bad: 0.15, invert: true}}
+          - {kind: gauge, x: 90, y: 40, r: 15, bind: ai/codex7d, label: codex}
+      - x: 4
+        y: 122
+        w: 312
+        h: 44
+        accent: web
+        widgets:
+          - {kind: ticker, x: 8, y: 4, w: 296}
+          - {kind: text, x: 8, y: 27, text: "feeds ok · uptime {{sys/uptime|duration}}", color: muted}
+  - name: clusters
+    title: Clusters
+    cards:
+      - x: 4
+        y: 22
+        w: 206
+        h: 144
+        accent: net
+        widgets:
+          - kind: rows
+            x: 10
+            y: 6
+            w: 190
+            items: [{key: alpha}, {key: beta}, {key: gamma, name: gamma-long}, {key: delta}, {key: epsilon}, {key: zeta}]
+            cols:
+              - {kind: led, bind: "k8s/ready/{}"}
+              - {kind: name, w: 70}
+              - {kind: num, bind: "k8s/pods/{}", w: 30, fmt: int}
+              - {kind: bar, bind: "k8s/mem/{}", w: 30, thresholds: {warn: 0.8, bad: 0.9}}
+              - {kind: spark, bind: "k8s/cpu/{}", w: 24, color: net}
+      - x: 214
+        y: 22
+        w: 102
+        h: 144
+        accent: net
+        widgets:
+          - {kind: kpi, x: 8, y: 4, bind: k8s/bad_pods, label: bad pods, fmt: int, thresholds: {warn: 0, bad: 1}}
+          - {kind: bars, x: 8, y: 60, w: 86, h: 40, bind: k8s/bad_24h, color: bad}
+          - {kind: kpi, x: 8, y: 106, bind: k8s/nodes, label: nodes, size: mid, unit: " up"}
+  - name: probes
+    title: Probes and storage
+    cards:
+      - x: 4
+        y: 22
+        w: 150
+        h: 144
+        accent: ok
+        widgets:
+          - {kind: dots, x: 8, y: 4, bind: "probe/{}", label: machines, per_row: 6, items: [{key: a}, {key: b}, {key: c}, {key: d}, {key: e}, {key: f}, {key: g}, {key: h}]}
+          - {kind: hbar, x: 8, y: 50, w: 134, bind: nas/vol1, label: vol1, thresholds: {warn: 0.8, bad: 0.9}}
+          - {kind: hbar, x: 8, y: 66, w: 134, bind: nas/vol2, label: vol2, thresholds: {warn: 0.8, bad: 0.9}}
+          - {kind: hbar, x: 8, y: 82, w: 134, bind: nas/missing, label: vol3}
+          - {kind: kpi, x: 8, y: 100, bind: nas/free, label: free, fmt: bytes, size: mid}
+          - {kind: kpi, x: 80, y: 100, bind: gpu/temp, label: gpu, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}}
+      - x: 160
+        y: 22
+        w: 156
+        h: 144
+        accent: web
+        widgets:
+          - {kind: image, x: 8, y: 6, w: 140, h: 90, bind: cam/front, label: front}
+          - {kind: ticker, x: 8, y: 102, w: 140, bind: sys/message, color: text2}
+          - {kind: text, x: 8, y: 124, text: "load {{sys/load|dec1}} · {{sys/old}} (old)", color: text}
+  - name: dense
+    title: Thirteen cards
+    cards:
+      - x: 4
+        y: 22
+        w: 59
+        h: 46
+        accent: bitcoin
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v0, label: v0, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 67
+        y: 22
+        w: 59
+        h: 46
+        accent: web
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v1, label: v1, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 130
+        y: 22
+        w: 59
+        h: 46
+        accent: ai
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v2, label: v2, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 193
+        y: 22
+        w: 59
+        h: 46
+        accent: net
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v3, label: v3, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 256
+        y: 22
+        w: 59
+        h: 46
+        accent: ok
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v4, label: v4, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 4
+        y: 72
+        w: 59
+        h: 46
+        accent: bitcoin
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v5, label: v5, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 67
+        y: 72
+        w: 59
+        h: 46
+        accent: web
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v6, label: v6, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 130
+        y: 72
+        w: 59
+        h: 46
+        accent: ai
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v7, label: v7, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 193
+        y: 72
+        w: 59
+        h: 46
+        accent: net
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v8, label: v8, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 256
+        y: 72
+        w: 59
+        h: 46
+        accent: ok
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v9, label: v9, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 4
+        y: 122
+        w: 59
+        h: 46
+        accent: bitcoin
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v10, label: v10, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 67
+        y: 122
+        w: 59
+        h: 46
+        accent: web
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v11, label: v11, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}
+      - x: 130
+        y: 122
+        w: 59
+        h: 46
+        accent: ai
+        widgets:
+          - {kind: kpi, x: 8, y: 2, bind: dense/v12, label: v12, size: mid}
+          - {kind: spark, x: 8, y: 30, w: 46, h: 12, bind: btc/price_24h}

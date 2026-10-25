@@ -48,9 +48,9 @@ plugins:
       cpu1h/host-c: [0.1, 0.12, 0.09, 0.14, 0.11, 0.1, 0.13, 0.12, 0.1, 0.12]
       wan_rx: 18400000
       wan_tx: 2300000
-      wan_rx_1h: [12e6, 14e6, 11e6, 19e6, 22e6, 18e6, 17e6, 21e6, 16e6, 18.4e6]
-      wan_tx_1h: [2e6, 2.2e6, 1.9e6, 2.5e6, 2.1e6, 2.4e6, 2.3e6, 2.6e6, 2.2e6, 2.3e6]
-      wan_lat: 0.011
+      wan_rx_1h: [12000000, 14000000, 11000000, 19000000, 22000000, 18000000, 17000000, 21000000, 16000000, 18400000]
+      wan_tx_1h: [2000000, 2200000, 1900000, 2500000, 2100000, 2400000, 2300000, 2600000, 2200000, 2300000]
+      wan_lat: 11.4
       clients: 64
       up/router: 1
       up/switch-1: 1
@@ -95,9 +95,9 @@ pages:
           {kind: rows, x: 10, y: 8, w: 290, row_h: 24,
            items: [{key: alpha}, {key: beta}, {key: gamma}],
            cols: [{kind: led, bind: "d/ready/{}"}, {kind: name, w: 70},
-                  {kind: num, bind: "d/nodes/{}", w: 30, fmt: int, unit: n},
-                  {kind: num, bind: "d/pods/{}", w: 50, fmt: int, unit: pods},
-                  {kind: bar, bind: "d/mem/{}", w: 90, color: net, thresholds: {warn: 0.8, bad: 0.9}}]}]}
+                  {kind: num, bind: "d/nodes/{}", w: 50, fmt: int, unit: nodes},
+                  {kind: num, bind: "d/pods/{}", w: 60, fmt: int, unit: pods},
+                  {kind: bar, bind: "d/mem/{}", w: 80, color: net, thresholds: {warn: 0.8, bad: 0.9}}]}]}
 
   - name: hosts
     title: Hosts
@@ -105,18 +105,18 @@ pages:
       - {x: 6, y: 24, w: 100, h: 140, accent: web, title: host-a, widgets: [
           {kind: gauge, x: 26, y: 50, r: 16, bind: d/cpu/host-a, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
           {kind: gauge, x: 70, y: 50, r: 16, bind: d/hmem/host-a, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
-          {kind: kpi, x: 10, y: 66, bind: d/nvme/host-a, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
-          {kind: spark, x: 10, y: 100, w: 80, h: 22, bind: d/cpu1h/host-a, color: web}]}
+          {kind: kpi, x: 10, y: 74, bind: d/nvme/host-a, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: spark, x: 10, y: 108, w: 80, h: 20, bind: d/cpu1h/host-a, color: web}]}
       - {x: 110, y: 24, w: 100, h: 140, accent: web, title: host-b, widgets: [
           {kind: gauge, x: 26, y: 50, r: 16, bind: d/cpu/host-b, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
           {kind: gauge, x: 70, y: 50, r: 16, bind: d/hmem/host-b, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
-          {kind: kpi, x: 10, y: 66, bind: d/nvme/host-b, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
-          {kind: spark, x: 10, y: 100, w: 80, h: 22, bind: d/cpu1h/host-b, color: web}]}
+          {kind: kpi, x: 10, y: 74, bind: d/nvme/host-b, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: spark, x: 10, y: 108, w: 80, h: 20, bind: d/cpu1h/host-b, color: web}]}
       - {x: 214, y: 24, w: 100, h: 140, accent: web, title: host-c, widgets: [
           {kind: gauge, x: 26, y: 50, r: 16, bind: d/cpu/host-c, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
           {kind: gauge, x: 70, y: 50, r: 16, bind: d/hmem/host-c, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
-          {kind: kpi, x: 10, y: 66, bind: d/nvme/host-c, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
-          {kind: spark, x: 10, y: 100, w: 80, h: 22, bind: d/cpu1h/host-c, color: web}]}
+          {kind: kpi, x: 10, y: 74, bind: d/nvme/host-c, label: nvme, fmt: temp, size: mid, thresholds: {warn: 60, bad: 70}},
+          {kind: spark, x: 10, y: 108, w: 80, h: 20, bind: d/cpu1h/host-c, color: web}]}
 
   - name: network
     title: Network

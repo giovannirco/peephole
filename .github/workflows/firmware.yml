@@ -1,0 +1,45 @@
+name: firmware
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tdisplay-s3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install esphome
+      - run: esphome compile firmware/esphome/peephole-tdisplay-s3.yaml
+      - name: Name the image
+        id: name
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev.${GITHUB_SHA::7}"
+          fi
+          bins=(firmware/esphome/.esphome/build/*/build/firmware.factory.bin)
+          if [ "${#bins[@]}" -ne 1 ] || [ ! -f "${bins[0]}" ]; then
+            echo "expected exactly one firmware.factory.bin, found: ${bins[*]}" >&2
+            exit 1
+          fi
+          mkdir -p dist
+          cp "${bins[0]}" "dist/tdisplay-s3-${version}.factory.bin"
+          echo "file=dist/tdisplay-s3-${version}.factory.bin" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-tdisplay-s3
+          path: ${{ steps.name.outputs.file }}
+          if-no-files-found: error
+      - if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.name.outputs.file }}

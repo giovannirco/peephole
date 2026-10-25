@@ -14,3 +14,7 @@ fontdue.workspace = true
 png.workspace = true
 image.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+serde_yaml.workspace = true
