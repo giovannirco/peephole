@@ -13,7 +13,7 @@ An ESP32 cannot load code at runtime and should not hold the credentials of your
 ## Try it in two minutes
 
 ```bash
-cargo run -p peephole-hub --release
+PEEPHOLE_DEMO=1 cargo run -p peephole-hub --release
 # or
 docker run --rm -p 8080:8080 -e PEEPHOLE_DEMO=1 ghcr.io/giovannirco/peephole:latest
 ```
