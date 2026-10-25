@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/render", "crates/plugins", "crates/hub"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/giovannirco/peephole"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "gzip"] }
+async-trait = "0.1"
+futures = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+tiny-skia = "0.12"
+fontdue = "0.9"
+png = "0.18"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+wiremock = "0.6"

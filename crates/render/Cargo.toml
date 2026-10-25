@@ -1,0 +1,16 @@
+[package]
+name = "peephole-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Peephole: draws pages (cards, gauges, sparklines) with tiny-skia into PNG or RGB565 frames"
+
+[dependencies]
+peephole-core = { path = "../core" }
+anyhow.workspace = true
+tiny-skia.workspace = true
+fontdue.workspace = true
+png.workspace = true
+image.workspace = true
+chrono.workspace = true

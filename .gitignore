@@ -1,0 +1,6 @@
+target/
+.env
+*.local.yaml
+firmware/esphome/.esphome/
+firmware/esphome/secrets.yaml
+firmware/esphome/substitutions.local.yaml
