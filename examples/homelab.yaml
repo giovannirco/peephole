@@ -26,9 +26,8 @@ plugins:
       # AI gateway quota (ratios 0–1) and usage
       - {key: claude5h, expr: 'min(cliproxy_quota_remaining_ratio{provider="claude",window="five_hour"})'}
       - {key: claude7d, expr: 'min(cliproxy_quota_remaining_ratio{provider="claude",window="seven_day"})'}
-      - {key: fable7d, expr: 'min(cliproxy_quota_remaining_ratio{provider="claude",window=~".*fable.*|seven_day_opus"})'}
       - {key: codex5h, expr: 'min(cliproxy_quota_remaining_ratio{provider="codex",window="five_hour"})'}
-      - {key: codex7d, expr: 'min(cliproxy_quota_remaining_ratio{provider="codex",window=~"seven_day|weekly"})'}
+      - {key: agent7d, expr: 'min(cliproxy_quota_remaining_ratio{provider="antigravity",window="claude_gpt_weekly"})'}
       - {key: xai7d, expr: 'min(cliproxy_quota_remaining_ratio{provider="xai",window="weekly"})'}
       - {key: aireq, expr: 'sum by (provider) (increase(cliproxy_requests_total[24h]))', label: provider}
       - {key: aitok, expr: 'sum by (provider) (increase(cliproxy_tokens_total[24h]))', label: provider}
@@ -107,19 +106,19 @@ pages:
     title: Overview
     header: false
     cards:
-      - {x: 6, y: 6, w: 118, h: 58, widgets: [
+      - {x: 6, y: 6, w: 118, h: 62, widgets: [
           {kind: text, x: 8, y: 2, text: "{{clock/time}}", font: clock},
           {kind: text, x: 8, y: 44, text: "{{clock/date}}", font: small, color: text2}]}
-      - {x: 130, y: 6, w: 184, h: 58, accent: ai, widgets: [
-          {kind: gauge, x: 30, y: 46, r: 17, bind: p/claude5h, label: claude 5h, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
-          {kind: gauge, x: 92, y: 46, r: 17, bind: p/claude7d, label: claude 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
-          {kind: gauge, x: 154, y: 46, r: 17, bind: p/codex7d, label: codex 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}}]}
-      - {x: 6, y: 70, w: 206, h: 76, accent: bitcoin, widgets: [
+      - {x: 130, y: 6, w: 184, h: 62, accent: ai, widgets: [
+          {kind: gauge, x: 30, y: 40, r: 15, bind: p/claude5h, label: claude 5h, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 92, y: 40, r: 15, bind: p/claude7d, label: claude 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 154, y: 40, r: 15, bind: p/codex5h, label: codex 5h, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}}]}
+      - {x: 6, y: 72, w: 206, h: 74, accent: bitcoin, widgets: [
           {kind: kpi, x: 8, y: 4, bind: btc/price_usd, label: BTC · USD, fmt: thousands, color: bitcoin},
           {kind: kpi, x: 120, y: 4, bind: btc/tip_height, label: block, fmt: thousands, size: mid},
           {kind: kpi, x: 120, y: 36, bind: btc/fee_fast, label: fast fee, unit: sat/vB, fmt: int, size: mid},
           {kind: spark, x: 8, y: 48, w: 100, h: 22, bind: btc/price_24h, color: bitcoin}]}
-      - {x: 218, y: 70, w: 96, h: 76, accent: bad, widgets: [
+      - {x: 218, y: 72, w: 96, h: 74, accent: bad, widgets: [
           {kind: kpi, x: 8, y: 4, bind: p/alerts, label: alerts firing, fmt: int, thresholds: {warn: 0.5, bad: 5}},
           {kind: kpi, x: 8, y: 42, bind: p/machines_up, label: machines up, fmt: int, size: mid}]}
       - {x: 6, y: 150, w: 308, h: 16, widgets: [{kind: ticker, x: 6, y: 1, w: 296, color: text2}]}
@@ -130,26 +129,26 @@ pages:
       - {x: 6, y: 24, w: 308, h: 70, accent: ai, widgets: [
           {kind: gauge, x: 30, y: 52, r: 18, bind: p/claude5h, label: claude 5h, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
           {kind: gauge, x: 92, y: 52, r: 18, bind: p/claude7d, label: claude 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
-          {kind: gauge, x: 154, y: 52, r: 18, bind: p/fable7d, label: fable 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
-          {kind: gauge, x: 216, y: 52, r: 18, bind: p/codex7d, label: codex 7d, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 154, y: 52, r: 18, bind: p/codex5h, label: codex 5h, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
+          {kind: gauge, x: 216, y: 52, r: 18, bind: p/agent7d, label: agent week, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}},
           {kind: gauge, x: 278, y: 52, r: 18, bind: p/xai7d, label: xai week, color: ai, thresholds: {warn: 0.4, bad: 0.15, invert: true}}]}
-      - {x: 6, y: 100, w: 150, h: 64, accent: ai, title: requests · 24 h, widgets: [
+      - {x: 6, y: 100, w: 150, h: 64, accent: ai, title: "24 h · requests · tokens", widgets: [
           {kind: rows, x: 8, y: 16, w: 134, row_h: 14, items: [{key: claude}, {key: codex}, {key: xai}],
-           cols: [{kind: name, w: 50}, {kind: num, bind: "p/aireq/{}", w: 40, fmt: int}, {kind: num, bind: "p/aitok/{}", w: 40, fmt: auto, unit: tok}]}]}
+           cols: [{kind: name, w: 46}, {kind: num, bind: "p/aireq/{}", w: 36, fmt: int}, {kind: num, bind: "p/aitok/{}", w: 40, fmt: auto}]}]}
       - {x: 162, y: 100, w: 152, h: 64, accent: ai, title: requests per hour, widgets: [
           {kind: bars, x: 8, y: 16, w: 136, h: 40, bind: p/ai_req_hourly, color: ai}]}
 
   - name: websites
     title: Websites
     cards:
-      - {x: 6, y: 24, w: 190, h: 140, accent: web, widgets: [
-          {kind: rows, x: 8, y: 6, w: 174, row_h: 22, items: [{key: example.com, name: example}, {key: blog.example.com, name: blog}, {key: shop.example.com, name: shop}, {key: app.example.com, name: app}],
-           cols: [{kind: name, w: 56}, {kind: num, bind: "p/req24h/{}", w: 44, fmt: auto, unit: req}, {kind: num, bind: "p/uniq24h/{}", w: 40, fmt: auto, unit: vis}, {kind: num, bind: "p/threats/{}", w: 24, fmt: int, thresholds: {warn: 0.5, bad: 10}}]}]}
-      - {x: 202, y: 24, w: 112, h: 60, accent: web, widgets: [
-          {kind: kpi, x: 8, y: 4, bind: p/tunnels_up, label: tunnels up, fmt: int, size: mid},
-          {kind: kpi, x: 64, y: 4, bind: p/tunnels, label: of, fmt: int, size: mid}]}
-      - {x: 202, y: 90, w: 112, h: 74, accent: web, title: all sites · per hour, widgets: [
-          {kind: bars, x: 8, y: 16, w: 96, h: 50, bind: p/web_req_hourly, color: web}]}
+      - {x: 6, y: 24, w: 210, h: 140, accent: web, title: "zone · requests · visitors · threats (24 h)", widgets: [
+          {kind: rows, x: 8, y: 18, w: 194, row_h: 22, items: [{key: example.com, name: example}, {key: blog.example.com, name: blog}, {key: shop.example.com, name: shop}, {key: app.example.com, name: app}],
+           cols: [{kind: name, w: 60}, {kind: num, bind: "p/req24h/{}", w: 50, fmt: auto}, {kind: num, bind: "p/uniq24h/{}", w: 46, fmt: auto}, {kind: num, bind: "p/threats/{}", w: 22, fmt: int, thresholds: {warn: 0.5, bad: 10}}]}]}
+      - {x: 222, y: 24, w: 92, h: 60, accent: web, widgets: [
+          {kind: text, x: 8, y: 4, text: tunnels up, font: small, color: text2},
+          {kind: text, x: 8, y: 18, text: "{{p/tunnels_up|int}} / {{p/tunnels|int}}", font: num}]}
+      - {x: 222, y: 90, w: 92, h: 74, accent: web, title: per hour, widgets: [
+          {kind: bars, x: 8, y: 16, w: 76, h: 50, bind: p/web_req_hourly, color: web}]}
 
   - name: bitcoin
     title: Bitcoin
@@ -157,7 +156,7 @@ pages:
       - {x: 6, y: 24, w: 160, h: 70, accent: bitcoin, widgets: [
           {kind: kpi, x: 8, y: 4, bind: btc/price_usd, label: USD, fmt: thousands, color: bitcoin},
           {kind: kpi, x: 96, y: 4, bind: btc/price_eur, label: EUR, fmt: thousands, size: mid},
-          {kind: kpi, x: 96, y: 34, bind: btc/price_brl, label: BRL, fmt: thousands, size: mid},
+          {kind: kpi, x: 96, y: 34, bind: btc/hashrate_eh, label: hashrate, fmt: int, unit: EH/s, size: mid},
           {kind: spark, x: 8, y: 46, w: 80, h: 18, bind: btc/price_24h, color: bitcoin}]}
       - {x: 172, y: 24, w: 142, h: 70, accent: bitcoin, title: fees · sat/vB, widgets: [
           {kind: kpi, x: 8, y: 16, bind: btc/fee_fast, label: fast, fmt: int, size: mid},
@@ -166,11 +165,11 @@ pages:
           {kind: kpi, x: 8, y: 44, bind: btc/mempool_count, label: mempool tx, fmt: auto, size: mid},
           {kind: kpi, x: 80, y: 44, bind: btc/mempool_vsize, label: vsize, fmt: bytes, size: mid}]}
       - {x: 6, y: 100, w: 160, h: 64, accent: bitcoin, title: node, widgets: [
-          {kind: kpi, x: 8, y: 16, bind: p/node_blocks, label: height, fmt: thousands, size: mid},
-          {kind: kpi, x: 80, y: 16, bind: p/node_peers, label: peers, fmt: int, size: mid, thresholds: {warn: 8, bad: 3, invert: true}},
-          {kind: kpi, x: 8, y: 42, bind: btc/tip_height, label: network tip, fmt: thousands, size: mid}]}
+          {kind: kpi, x: 8, y: 18, bind: p/node_blocks, label: height, fmt: thousands, size: mid},
+          {kind: kpi, x: 80, y: 18, bind: p/node_peers, label: peers, fmt: int, size: mid, thresholds: {warn: 8, bad: 3, invert: true}},
+          {kind: kpi, x: 116, y: 18, bind: p/node_mempool, label: mempool, fmt: auto, size: mid}]}
       - {x: 172, y: 100, w: 142, h: 64, accent: bitcoin, title: difficulty, widgets: [
-          {kind: gauge, x: 30, y: 56, r: 16, bind: btc/difficulty_progress, label: epoch, color: bitcoin},
+          {kind: gauge, x: 30, y: 46, r: 15, bind: btc/difficulty_progress, label: epoch, color: bitcoin},
           {kind: kpi, x: 60, y: 14, bind: btc/difficulty_change, label: next change, unit: "%", fmt: dec1, size: mid},
           {kind: kpi, x: 60, y: 40, bind: btc/remaining_blocks, label: blocks left, fmt: int, size: mid}]}
 
@@ -179,7 +178,7 @@ pages:
     cards:
       - {x: 6, y: 24, w: 206, h: 140, accent: net, widgets: [
           {kind: rows, x: 8, y: 4, w: 190, row_h: 22, items: [{key: cluster-a}, {key: cluster-b}, {key: cluster-c}, {key: cluster-d}, {key: cluster-e}, {key: cluster-f}],
-           cols: [{kind: led, bind: "p/ready/{}"}, {kind: name, w: 66}, {kind: num, bind: "p/nodes/{}", w: 20, fmt: int}, {kind: num, bind: "p/pods/{}", w: 34, fmt: int}, {kind: bar, bind: "p/mem/{}", w: 46, color: net, thresholds: {warn: 0.8, bad: 0.9}}]}]}
+           cols: [{kind: led, bind: "p/ready/{}"}, {kind: name, w: 60}, {kind: num, bind: "p/nodes/{}", w: 18, fmt: int}, {kind: num, bind: "p/pods/{}", w: 32, fmt: int}, {kind: bar, bind: "p/mem/{}", w: 56, color: net, thresholds: {warn: 0.8, bad: 0.9}}]}]}
       - {x: 218, y: 24, w: 96, h: 140, accent: bad, title: bad pods · 24 h, widgets: [
           {kind: spark, x: 8, y: 20, w: 80, h: 40, bind: p/badpods_hourly, color: bad},
           {kind: kpi, x: 8, y: 70, bind: p/alerts, label: alerts firing, fmt: int, thresholds: {warn: 0.5, bad: 5}}]}
@@ -246,14 +245,15 @@ pages:
     title: Probes
     cards:
       - {x: 6, y: 24, w: 100, h: 66, accent: ok, widgets: [
-          {kind: kpi, x: 8, y: 4, bind: p/machines_up, label: machines up, fmt: int},
-          {kind: kpi, x: 60, y: 4, bind: p/machines, label: of, fmt: int, size: mid}]}
+          {kind: text, x: 8, y: 4, text: machines up, font: small, color: text2},
+          {kind: text, x: 8, y: 20, text: "{{p/machines_up|int}} / {{p/machines|int}}", font: num}]}
       - {x: 110, y: 24, w: 100, h: 66, accent: ok, widgets: [
-          {kind: kpi, x: 8, y: 4, bind: p/services_up, label: services up, fmt: int},
-          {kind: kpi, x: 60, y: 4, bind: p/services, label: of, fmt: int, size: mid}]}
+          {kind: text, x: 8, y: 4, text: services up, font: small, color: text2},
+          {kind: text, x: 8, y: 20, text: "{{p/services_up|int}} / {{p/services|int}}", font: num}]}
       - {x: 214, y: 24, w: 100, h: 66, accent: ok, widgets: [
-          {kind: kpi, x: 8, y: 4, bind: p/nas_up, label: NAS probes, fmt: int},
-          {kind: kpi, x: 60, y: 4, bind: p/checks_bad, label: checks bad, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
+          {kind: text, x: 8, y: 4, text: NAS probes, font: small, color: text2},
+          {kind: text, x: 8, y: 20, text: "{{p/nas_up|int}} / {{p/nas|int}}", font: num},
+          {kind: text, x: 8, y: 48, text: "checks failing {{p/checks_bad|int}}", font: small, color: text2}]}
       - {x: 6, y: 96, w: 308, h: 68, accent: ok, widgets: [
           {kind: dots, x: 8, y: 6, per_row: 12, bind: "p/machine/{}", label: machines,
            items: [{key: host-a}, {key: host-b}, {key: host-c}, {key: gpu-node}, {key: nas}, {key: router}, {key: switch-1}, {key: switch-2}, {key: switch-3}, {key: ap-1}, {key: ap-2}, {key: nvr}]},
@@ -274,19 +274,19 @@ pages:
   - name: backups
     title: Backups
     cards:
-      - {x: 6, y: 24, w: 206, h: 140, accent: ok, title: clusters · age of last good backup, widgets: [
-          {kind: rows, x: 8, y: 18, w: 190, row_h: 20, items: [{key: cluster-a}, {key: cluster-b}, {key: cluster-c}, {key: cluster-d}, {key: cluster-e}, {key: cluster-f}],
-           cols: [{kind: name, w: 70}, {kind: num, bind: "p/velero_age/{}", w: 56, fmt: duration, unit: velero, thresholds: {warn: 108000, bad: 180000}}, {kind: num, bind: "p/cnpg_age/{}", w: 56, fmt: duration, unit: pg, thresholds: {warn: 108000, bad: 180000}}]}]}
-      - {x: 218, y: 24, w: 96, h: 140, accent: ok, title: vzdump, widgets: [
-          {kind: rows, x: 8, y: 18, w: 80, row_h: 24, items: [{key: host-a}, {key: host-b}, {key: host-c}],
-           cols: [{kind: name, w: 36}, {kind: num, bind: "p/vzdump_age/{}", w: 40, fmt: duration, thresholds: {warn: 108000, bad: 180000}}]}]}
+      - {x: 6, y: 24, w: 192, h: 140, accent: ok, title: "last good backup · velero · postgres", widgets: [
+          {kind: rows, x: 8, y: 18, w: 176, row_h: 20, items: [{key: cluster-a}, {key: cluster-b}, {key: cluster-c}, {key: cluster-d}, {key: cluster-e}, {key: cluster-f}],
+           cols: [{kind: name, w: 58}, {kind: num, bind: "p/velero_age/{}", w: 52, fmt: duration, thresholds: {warn: 108000, bad: 180000}}, {kind: num, bind: "p/cnpg_age/{}", w: 52, fmt: duration, thresholds: {warn: 108000, bad: 180000}}]}]}
+      - {x: 204, y: 24, w: 110, h: 140, accent: ok, title: vzdump, widgets: [
+          {kind: rows, x: 8, y: 18, w: 94, row_h: 24, items: [{key: host-a}, {key: host-b}, {key: host-c}],
+           cols: [{kind: name, w: 50}, {kind: num, bind: "p/vzdump_age/{}", w: 38, fmt: duration, thresholds: {warn: 108000, bad: 180000}}]}]}
 
   - name: whatsapp
     title: WhatsApp · AI usage
     cards:
       - {x: 6, y: 24, w: 150, h: 140, accent: ok, title: messages · 24 h, widgets: [
-          {kind: rows, x: 8, y: 18, w: 134, row_h: 22, items: [{key: line-a}, {key: line-b}, {key: line-c}],
-           cols: [{kind: led, bind: "p/waha/{}"}, {kind: name, w: 50}, {kind: num, bind: "p/msgs24h/{}", w: 50, fmt: int}]},
+          {kind: rows, x: 8, y: 18, w: 134, row_h: 22, items: [{key: session-a}, {key: session-b}, {key: session-c}],
+           cols: [{kind: name, w: 60}, {kind: num, bind: "p/msgs24h/{}", w: 60, fmt: int}]},
           {kind: bars, x: 8, y: 92, w: 134, h: 36, bind: p/wa_hourly, color: ok}]}
       - {x: 162, y: 24, w: 152, h: 140, accent: ai, title: AI tokens · 24 h, widgets: [
           {kind: rows, x: 8, y: 18, w: 136, row_h: 22, items: [{key: claude}, {key: codex}, {key: xai}],

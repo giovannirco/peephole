@@ -45,14 +45,13 @@ impl PriceRing {
     }
 }
 
+/// `{"time": …, "USD": 80188, "EUR": 71471, …}`: every currency the API offers, emitted as `price_<lower>`.
 #[derive(Deserialize)]
 struct Prices {
     #[serde(rename = "USD")]
     usd: f64,
-    #[serde(rename = "EUR")]
-    eur: f64,
-    #[serde(rename = "BRL")]
-    brl: f64,
+    #[serde(flatten)]
+    others: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -123,7 +122,15 @@ impl Mempool {
             ring.push(hour, p.usd);
             ring.series(hour)
         };
-        let mut values = numbers(&[("price_usd", p.usd), ("price_eur", p.eur), ("price_brl", p.brl)]);
+        let mut values = numbers(&[("price_usd", p.usd)]);
+        for (currency, v) in &p.others {
+            if currency.len() == 3
+                && currency.chars().all(|c| c.is_ascii_uppercase())
+                && let Some(n) = v.as_f64()
+            {
+                values.push((format!("price_{}", currency.to_ascii_lowercase()), Value::Number(n)));
+            }
+        }
         values.push(("price_24h".into(), Value::Series(series)));
         Ok(values)
     }
@@ -165,7 +172,7 @@ impl Mempool {
 
     async fn hashrate(&self) -> anyhow::Result<Values> {
         let h: Hashrate = self.json("api/v1/mining/hashrate/3d").await?;
-        Ok(numbers(&[("hashrate", h.current_hashrate)]))
+        Ok(numbers(&[("hashrate", h.current_hashrate), ("hashrate_eh", h.current_hashrate / 1e18)]))
     }
 }
 
@@ -242,7 +249,7 @@ mod tests {
     async fn full_server() -> MockServer {
         let server = MockServer::start().await;
         let ok = |body: serde_json::Value| ResponseTemplate::new(200).set_body_json(body);
-        mount(&server, "/api/v1/prices", ok(json!({"time": 1, "USD": 100000, "EUR": 90000, "BRL": 550000}))).await;
+        mount(&server, "/api/v1/prices", ok(json!({"time": 1, "USD": 100000, "EUR": 90000, "GBP": 80000}))).await;
         mount(&server, "/api/blocks/tip/height", ResponseTemplate::new(200).set_body_string("920123")).await;
         mount(
             &server,
@@ -277,7 +284,7 @@ mod tests {
         let n = |k: &str| got[k].as_f64().unwrap_or_else(|| panic!("{k} is not a number"));
         assert_eq!(n("price_usd"), 100000.0);
         assert_eq!(n("price_eur"), 90000.0);
-        assert_eq!(n("price_brl"), 550000.0);
+        assert_eq!(n("price_gbp"), 80000.0);
         assert_eq!(n("tip_height"), 920123.0);
         assert_eq!(n("fee_fast"), 12.0);
         assert_eq!(n("fee_half_hour"), 8.0);
@@ -290,6 +297,7 @@ mod tests {
         assert_eq!(n("difficulty_change"), -1.25);
         assert_eq!(n("remaining_blocks"), 1159.0);
         assert_eq!(n("hashrate"), 9.5e20);
+        assert_eq!(n("hashrate_eh"), 950.0);
         assert_eq!(n("_endpoints_ok"), 6.0);
         assert_eq!(n("_endpoints_failed"), 0.0);
     }

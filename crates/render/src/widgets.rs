@@ -299,7 +299,7 @@ impl Painter<'_> {
                         Reading::Stale(v, _) => (format_value(v, *fmt), MUTED),
                     };
                     let s = match (unit, s.as_str()) {
-                        (Some(u), v) if v != "--" => format!("{v}{u}"),
+                        (Some(u), v) if v != "--" => format!("{v} {u}"),
                         _ => s,
                     };
                     self.cv.text(cx + w, mid - Font::Mid.height() / 2, Font::Mid, c, Align::Right, &s);
