@@ -175,7 +175,8 @@ impl Kubernetes {
 }
 
 enum Trust {
-    Roots(Vec<reqwest::Certificate>),
+    /// The CA bundle and the setting it came from (`ca_pem` or `ca_file`).
+    Roots(Vec<reqwest::Certificate>, &'static str),
     Anything,
 }
 
@@ -224,23 +225,24 @@ fn read_token(entry: &ClusterSettings) -> anyhow::Result<String> {
 
 fn trust(entry: &ClusterSettings) -> anyhow::Result<Trust> {
     anyhow::ensure!(!(entry.in_cluster && entry.ca_pem.is_some()), "in_cluster reads its CA from ca_file, not ca_pem");
-    let pem = match (&entry.ca_pem, &entry.ca_file, entry.insecure) {
+    let (pem, field) = match (&entry.ca_pem, &entry.ca_file, entry.insecure) {
         (None, None, true) => return Ok(Trust::Anything),
         (Some(_), _, true) | (_, Some(_), true) => anyhow::bail!("insecure cannot be combined with ca_pem or ca_file"),
         (Some(_), Some(_), false) => anyhow::bail!("set ca_pem or ca_file, not both"),
-        (Some(pem), None, false) => pem.clone(),
+        (Some(pem), None, false) => (pem.clone(), "ca_pem"),
         (None, file, false) => {
             let path = match file {
                 Some(path) => path.clone(),
                 None if entry.in_cluster => format!("{SA_DIR}/ca.crt"),
                 None => anyhow::bail!("ca_pem, ca_file or insecure: true is required"),
             };
-            std::fs::read_to_string(&path).with_context(|| format!("reading ca_file {path}"))?
+            (std::fs::read_to_string(&path).with_context(|| format!("reading ca_file {path}"))?, "ca_file")
         }
     };
-    let roots = reqwest::Certificate::from_pem_bundle(pem.as_bytes()).context("ca_pem is not a PEM bundle")?;
-    anyhow::ensure!(!roots.is_empty(), "ca_pem holds no PEM certificate");
-    Ok(Trust::Roots(roots))
+    let roots = reqwest::Certificate::from_pem_bundle(pem.as_bytes())
+        .with_context(|| format!("{field} is not a PEM bundle"))?;
+    anyhow::ensure!(!roots.is_empty(), "{field} holds no PEM certificate");
+    Ok(Trust::Roots(roots, field))
 }
 
 /// The bearer header is marked sensitive and never formatted into an error.
@@ -250,11 +252,13 @@ fn client(timeout: Duration, token: &str, trust: Trust) -> anyhow::Result<reqwes
     auth.set_sensitive(true);
     let headers = HeaderMap::from_iter([(AUTHORIZATION, auth)]);
     let builder = reqwest::Client::builder().timeout(timeout).default_headers(headers);
-    let builder = match trust {
-        Trust::Roots(roots) => builder.tls_certs_only(roots),
-        Trust::Anything => builder.tls_danger_accept_invalid_certs(true),
-    };
-    builder.build().context("building the HTTP client (is ca_pem a valid certificate?)")
+    match trust {
+        Trust::Roots(roots, field) => builder
+            .tls_certs_only(roots)
+            .build()
+            .with_context(|| format!("building the HTTP client (is {field} a valid certificate?)")),
+        Trust::Anything => builder.tls_danger_accept_invalid_certs(true).build().context("building the HTTP client"),
+    }
 }
 
 #[async_trait]

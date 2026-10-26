@@ -145,6 +145,15 @@ fn a_ca_that_is_not_pem_is_rejected_naming_the_cluster() {
 }
 
 #[test]
+fn a_ca_file_that_is_not_pem_is_rejected_naming_ca_file() {
+    let dir = sa_dir("badca", TOKEN);
+    std::fs::write(dir.join("ca.crt"), "not a certificate").unwrap();
+    let yaml = in_cluster_yaml(&dir).replace("in_cluster: true", "in_cluster: true, url: 'https://x.example.invalid'");
+    let err = error(&yaml);
+    assert!(err.contains("\"local\"") && err.contains("ca_file") && !err.contains("ca_pem"), "{err}");
+}
+
+#[test]
 fn cluster_names_must_be_present_and_distinct() {
     assert!(error("clusters: []").contains("clusters"));
     let remote = |name: &str| format!("{{name: '{name}', url: 'https://x.example.invalid', token: t, insecure: true}}");
