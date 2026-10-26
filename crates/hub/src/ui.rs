@@ -44,7 +44,7 @@ const INDEX: &str = r#"<!doctype html>
 <body>
 <header>
   <h1>%%TITLE%%</h1>%%BADGE%%
-  <nav><a href="/flash/">Flash a board</a><a href="/api/values">Values</a></nav>
+  <nav><a href="/settings">Settings</a><a href="/flash/">Flash a board</a><a href="/api/values">Values</a></nav>
 </header>
 <main>
   <h2>Pages</h2>
@@ -164,6 +164,184 @@ const FLASH: &str = r#"<!doctype html>
 </html>
 "#;
 
+const SETTINGS_STYLE: &str = r#"
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--text2); }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--edge); border-radius: 10px; padding: 12px 14px; }
+.card h3 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.kind { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #1b2a3d; color: var(--accent); }
+.meta { color: var(--text2); font-size: 12px; margin: 4px 0; }
+.error { color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
+details { margin-top: 8px; } summary { cursor: pointer; color: var(--text2); }
+details ul { margin: 4px 0; padding-left: 18px; } .env { color: var(--accent); } .secret { color: var(--text2); }
+.field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.field > span:first-child { width: 90px; color: var(--text2); }
+.checks label { margin-right: 12px; white-space: nowrap; }
+input.num { width: 80px; } input[type=checkbox] { width: auto; }
+#status.ok { color: var(--ok); }
+"#;
+
+const SETTINGS: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings · %%TITLE%%</title>
+<style>%%STYLE%%%%SETTINGS_STYLE%%</style>
+</head>
+<body>
+<header>
+  <h1>Settings</h1>%%BADGE%%
+  <nav><a href="/">Back to %%TITLE%%</a><a href="/flash/">Flash a board</a></nav>
+</header>
+<main>
+  <p class="note">The hub is configured by its YAML file and its environment: change them and restart the hub. Only device settings change here.</p>
+  %%TOKEN%%
+  <div id="status"></div>
+  <h2>Hub</h2>
+  <table><thead><tr><th>Setting</th><th>Value</th><th>Set by</th></tr></thead><tbody id="hub"></tbody></table>
+  <h2>Environment</h2>
+  <table><thead><tr><th>Variable</th><th></th></tr></thead><tbody id="env"></tbody></table>
+  <h2>Plugins</h2>
+  <div class="cards" id="plugins"></div>
+  <h2>Devices</h2>
+  <div class="cards" id="devices"></div>
+</main>
+<script>
+const statusLine = document.getElementById('status');
+const tokenInput = document.getElementById('token');
+
+function el(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (text !== undefined) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+
+function say(text, ok) { statusLine.textContent = text; statusLine.className = ok ? 'ok' : ''; }
+
+async function send(path, body) {
+  const opts = { method: 'POST', headers: {} };
+  if (body !== undefined) { opts.headers['content-type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  if (tokenInput && tokenInput.value) opts.headers['authorization'] = 'Bearer ' + tokenInput.value;
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    say(err.error || res.statusText, false);
+    return false;
+  }
+  say('Saved.', true);
+  return true;
+}
+
+function ago(s) {
+  if (s === null || s === undefined) return 'never';
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  return Math.floor(s / 3600) + 'h ago';
+}
+
+function dot(ok) { return el('span', undefined, 'dot' + (ok === true ? ' ok' : ok === false ? ' bad' : '')); }
+
+function row(cells) { const tr = el('tr'); cells.forEach(c => { const td = el('td'); td.append(c); tr.append(td); }); return tr; }
+
+function envText(v) {
+  let t = 'env ' + v.env + ' · ' + (v.set ? 'set' : 'unset');
+  if (v.default !== undefined) t += ' · default ' + v.default;
+  return el('span', t, 'env');
+}
+
+function shown(v) {
+  if (v === null) return document.createTextNode('null');
+  if (Array.isArray(v)) { const ul = el('ul'); v.forEach(x => { const li = el('li'); li.append(shown(x)); ul.append(li); }); return ul; }
+  if (typeof v === 'object') {
+    if (v.env !== undefined) return envText(v);
+    if (v.envs !== undefined) { const span = el('span'); v.envs.forEach((e, i) => { if (i) span.append(', '); span.append(envText(e)); }); return span; }
+    if (v.secret) return el('span', '••••', 'secret');
+    const ul = el('ul');
+    Object.keys(v).forEach(k => { const li = el('li', k + ': '); li.append(shown(v[k])); ul.append(li); });
+    return ul;
+  }
+  return document.createTextNode(String(v));
+}
+
+function renderHub(h) {
+  const yes = b => b ? 'yes' : 'no';
+  const rows = [
+    ['Title', h.title, 'config file (hub.title)'], ['Cycle', h.cycle_s + ' s', 'config file (hub.cycle_s)'],
+    ['Stale after', h.stale_s + ' s', 'config file (hub.stale_s)'], ['Demo mode', yes(h.demo), 'PEEPHOLE_DEMO'],
+    ['Changes need a token', yes(h.auth), 'PEEPHOLE_API_TOKEN'], ['Listen', h.listen, 'PEEPHOLE_LISTEN'],
+    ['Public URL', h.public_url || '—', 'PEEPHOLE_PUBLIC_URL'], ['Device state file', yes(h.state_file), 'PEEPHOLE_STATE'],
+    ['Firmware dir', yes(h.firmware_dir), 'PEEPHOLE_FIRMWARE_DIR'], ['Config file', h.config_path || 'built-in demo', 'PEEPHOLE_CONFIG'],
+  ];
+  document.getElementById('hub').replaceChildren(...rows.map(r => row([r[0], r[1], el('code', r[2])])));
+  document.getElementById('env').replaceChildren(...h.env.map(e => {
+    const state = el('span'); state.append(dot(e.set ? true : undefined), e.set ? 'set' : 'unset');
+    return row([el('code', e.name), state]);
+  }));
+}
+
+function renderPlugin(p) {
+  const card = el('div', undefined, 'card');
+  const h3 = el('h3'); h3.append(dot(p.ok), p.name, el('span', p.kind, 'kind'));
+  const interval = p.interval_s === null ? '' : 'every ' + p.interval_s + ' s · ';
+  const values = p.values === null ? '' : ' · ' + p.values + ' values';
+  card.append(h3, el('div', interval + 'last poll ' + ago(p.age_s) + values, 'meta'));
+  if (p.error) card.append(el('div', p.error, 'error'));
+  const poll = el('button', 'Poll now');
+  poll.onclick = async () => { if (await send('/api/plugins/' + encodeURIComponent(p.name) + '/poll')) setTimeout(load, 1000); };
+  card.append(poll);
+  const details = el('details'); details.append(el('summary', 'Settings'), shown(p.settings));
+  card.append(details);
+  return card;
+}
+
+function field(label, ...controls) { const f = el('div', undefined, 'field'); f.append(el('span', label), ...controls); return f; }
+
+function renderDevice(d, pages) {
+  const base = '/api/devices/' + encodeURIComponent(d.id) + '/';
+  const after = ok => { if (ok) load(); };
+  const card = el('div', undefined, 'card');
+  card.append(el('h3', d.name || d.id), el('div', d.id + ' · ' + d.width + '×' + d.height, 'meta'));
+  const name = el('input'); name.value = d.name || ''; name.maxLength = 64; name.placeholder = 'Name';
+  const saveName = el('button', 'Save'); saveName.onclick = async () => after(await send(base + 'name', { name: name.value }));
+  const cycle = el('input', undefined, 'num'); cycle.type = 'number'; cycle.min = 0; cycle.max = 86400; cycle.value = d.cycle_s;
+  const saveCycle = el('button', 'Save'); saveCycle.onclick = async () => after(await send(base + 'cycle', { cycle_s: Number(cycle.value) }));
+  const page = el('select');
+  pages.forEach((n, i) => {
+    if (d.pages.length && !d.pages.includes(n)) return;
+    const o = el('option', n); o.value = n; o.selected = i === d.page; page.append(o);
+  });
+  const savePage = el('button', 'Show'); savePage.onclick = async () => after(await send(base + 'page', { name: page.value }));
+  const checks = el('div', undefined, 'checks');
+  pages.forEach(n => {
+    const label = el('label'); const box = el('input'); box.type = 'checkbox'; box.value = n; box.checked = d.pages.includes(n);
+    label.append(box, ' ' + n); checks.append(label);
+  });
+  const savePages = el('button', 'Save');
+  savePages.onclick = async () => {
+    const chosen = [...checks.querySelectorAll('input:checked')].map(b => b.value);
+    after(await send(base + 'pages', { pages: chosen }));
+  };
+  card.append(field('Name', name, saveName), field('Cycle (s)', cycle, saveCycle), field('Page', page, savePage),
+    field('Page list', checks, savePages), el('div', 'No page ticked = every page.', 'meta'));
+  return card;
+}
+
+async function load() {
+  const data = await (await fetch('/api/settings')).json();
+  renderHub(data.hub);
+  document.getElementById('plugins').replaceChildren(...data.plugins.map(renderPlugin));
+  const devices = data.devices.map(d => renderDevice(d, data.pages));
+  document.getElementById('devices').replaceChildren(...(devices.length ? devices : [el('p', 'No board has fetched a frame yet.', 'empty')]));
+}
+load().catch(e => say(String(e), false));
+</script>
+</body>
+</html>
+"#;
+
 /// The dashboard: every page as a live image, and the devices with their controls.
 pub fn index(hub: &Hub) -> String {
     let pages: String = hub
@@ -212,6 +390,23 @@ pub fn flash(hub: &Hub, builds: &[Firmware]) -> String {
         .replace("%%TITLE%%", &escape(&hub.cfg.hub.title))
         .replace("%%FIRMWARE%%", &firmware)
         .replace("%%HUB_URL%%", &hub_url)
+}
+
+/// The settings panel: shows the hub, its variables and plugins (redacted) and edits device settings.
+/// The token input (only when `PEEPHOLE_API_TOKEN` is set) keeps the token in the page's memory.
+pub fn settings(hub: &Hub) -> String {
+    let badge = if hub.demo { r#" <span class="badge">DEMO</span>"# } else { "" };
+    let token = if hub.api_token.is_some() {
+        r#"<p class="field"><span>API token</span><input id="token" type="password" autocomplete="off" placeholder="Needed to save changes"></p>"#
+    } else {
+        ""
+    };
+    SETTINGS
+        .replace("%%STYLE%%", STYLE)
+        .replace("%%SETTINGS_STYLE%%", SETTINGS_STYLE)
+        .replace("%%TITLE%%", &escape(&hub.cfg.hub.title))
+        .replace("%%BADGE%%", badge)
+        .replace("%%TOKEN%%", token)
 }
 
 fn escape(text: &str) -> String {

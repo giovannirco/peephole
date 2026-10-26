@@ -1,14 +1,15 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use http_body_util::BodyExt;
 use peephole_core::scheduler::{self, PollTriggers, Scheduler};
-use peephole_core::{Config, Registry, Store, Value};
+use peephole_core::{Config, Plugin, Registry, Store, Value};
 use peephole_hub::routes::router;
 use peephole_hub::settings::{ApiToken, Settings};
-use peephole_hub::state::{AppState, Hub};
+use peephole_hub::state::{self, AppState, Hub};
 use serde_json::{Value as Json, json};
 use tower::ServiceExt;
 
@@ -20,6 +21,7 @@ plugins:
   - kind: clock
   - kind: demo
     name: d
+    values: {n: 1}
 pages:
   - name: alpha
     title: Alpha
@@ -41,9 +43,13 @@ fn settings(demo: bool, firmware_dir: Option<PathBuf>, public_url: Option<&str>)
 }
 
 fn hub_with(settings: Settings, yaml: &str) -> AppState {
-    let cfg = Config::parse(yaml, |_| None).unwrap();
+    hub_from(settings, Config::parse(yaml, |_| None).unwrap(), Store::new(), PollTriggers::default())
+}
+
+fn hub_from(settings: Settings, cfg: Config, store: Store, polls: PollTriggers) -> AppState {
+    let plugins: Vec<Arc<dyn Plugin>> = cfg.plugins.iter().map(|e| peephole_plugins::build(e).unwrap()).collect();
     let registry = Registry::new(cfg.hub.cycle_s);
-    Hub::new(&settings, cfg, Store::new(), registry, PollTriggers::default())
+    Hub::new(&settings, cfg, store, registry, state::intervals(&plugins), polls)
 }
 
 fn running_hub(yaml: &str) -> (AppState, Scheduler) {
@@ -52,8 +58,7 @@ fn running_hub(yaml: &str) -> (AppState, Scheduler) {
     let store = Store::new();
     let (events, _) = tokio::sync::broadcast::channel(4);
     let scheduler = scheduler::run(plugins, store.clone(), events);
-    let registry = Registry::new(cfg.hub.cycle_s);
-    (Hub::new(&settings(false, None, None), cfg, store, registry, scheduler.triggers()), scheduler)
+    (hub_from(settings(false, None, None), cfg, store, scheduler.triggers()), scheduler)
 }
 
 async fn polled_at(
@@ -554,13 +559,7 @@ async fn with_a_token_every_post_needs_the_bearer_header() {
 #[tokio::test]
 async fn with_a_token_poll_now_is_accepted_with_the_bearer_header() {
     let (running, scheduler) = running_hub(SLOW);
-    let state = Hub::new(
-        &token_settings(false),
-        running.cfg.clone(),
-        running.store.clone(),
-        Registry::new(0),
-        running.polls.clone(),
-    );
+    let state = hub_from(token_settings(false), running.cfg.clone(), running.store.clone(), running.polls.clone());
     let app = router(state);
     let (status, _) = post_as(&app, "/api/plugins/d/poll", None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -588,4 +587,122 @@ async fn demo_mode_answers_403_even_with_a_token() {
         let (status, _) = post_as(&app, "/api/devices/m1/next", None, authorization.as_deref()).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{authorization:?}");
     }
+}
+
+const SENTINEL: &str = "SENTINEL-c2VjcmV0";
+
+const SECRET_CONFIG: &str = r#"
+hub: {title: Secret hub, cycle_s: 7, stale_s: 90}
+plugins:
+  - kind: prometheus
+    name: p
+    url: "http://u:${T}@prom.invalid:9090"
+    bearer_token: ${T}
+    headers: {X-Scope-OrgID: "${T}"}
+    queries: [{key: up, expr: up}]
+  - kind: clock
+    tz: ${TZ_UNSET:-UTC}
+pages: [{name: a}, {name: b}]
+"#;
+
+fn secret_hub() -> AppState {
+    let cfg = Config::parse(SECRET_CONFIG, |k| (k == "T").then(|| SENTINEL.to_owned())).unwrap();
+    let store = Store::new();
+    store.set("p/_ok", Value::Number(0.0));
+    store.set(
+        "p/_error",
+        Value::Text(format!("error sending request for url (http://u:{SENTINEL}@prom.invalid:9090/api)")),
+    );
+    let mut s = token_settings(false);
+    s.config = Some(PathBuf::from("/etc/peephole.yaml"));
+    s.public_url = Some("https://hub.example.invalid".into());
+    s.set_variables = vec!["PEEPHOLE_CONFIG", "PEEPHOLE_API_TOKEN"];
+    hub_from(s, cfg, store, PollTriggers::default())
+}
+
+#[tokio::test]
+async fn no_expanded_secret_reaches_any_settings_view() {
+    let app = router(secret_hub());
+    for uri in ["/api/settings", "/api/plugins", "/settings", "/api/config"] {
+        let (status, _, body) = get(&app, uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(!text.contains(SENTINEL), "{uri} leaks the secret: {text}");
+        assert!(!text.contains(TOKEN), "{uri} leaks the API token");
+    }
+}
+
+#[tokio::test]
+async fn api_settings_shows_the_hub_its_variables_and_redacted_plugins() {
+    let app = router(secret_hub());
+    let (_, _, body) = get(&app, "/api/settings").await;
+    let v = json_of(&body);
+    assert_eq!(
+        v["hub"],
+        json!({
+            "title": "Secret hub", "cycle_s": 7, "stale_s": 90, "demo": false, "auth": true,
+            "listen": "127.0.0.1:0", "public_url": "https://hub.example.invalid",
+            "state_file": false, "firmware_dir": false, "config_path": "/etc/peephole.yaml",
+            "env": [
+                {"name": "PEEPHOLE_CONFIG", "set": true}, {"name": "PEEPHOLE_LISTEN", "set": false},
+                {"name": "PEEPHOLE_DEMO", "set": false}, {"name": "PEEPHOLE_STATE", "set": false},
+                {"name": "PEEPHOLE_FIRMWARE_DIR", "set": false}, {"name": "PEEPHOLE_PUBLIC_URL", "set": false},
+                {"name": "PEEPHOLE_API_TOKEN", "set": true}
+            ]
+        })
+    );
+    let p = &v["plugins"][0];
+    assert_eq!(p["name"], "p");
+    assert_eq!(p["kind"], "prometheus");
+    assert_eq!(p["ok"], false);
+    assert_eq!(p["error"], "error sending request for url (http://prom.invalid:9090/api)");
+    assert_eq!(p["settings"]["url"], json!({"env": "T", "set": true}));
+    assert_eq!(p["settings"]["bearer_token"], json!({"env": "T", "set": true, "secret": true}));
+    assert_eq!(v["plugins"][1]["settings"]["tz"], json!({"env": "TZ_UNSET", "set": false, "default": "UTC"}));
+    assert_eq!(v["pages"], json!(["a", "b"]));
+    assert_eq!(v["devices"], json!([]));
+}
+
+#[tokio::test]
+async fn api_plugins_reports_interval_and_last_poll_without_settings() {
+    let state = hub(false);
+    state.store.set("d/_ok", Value::Number(1.0));
+    state.store.set("d/_error", Value::Text("an old failure".into()));
+    state.store.set("d/_values", Value::Number(3.0));
+    state.store.set("d/_polled_at", Value::Number(1.0));
+    let app = router(state);
+    let (status, _, body) = get(&app, "/api/plugins").await;
+    assert_eq!(status, StatusCode::OK);
+    let v = json_of(&body);
+    assert_eq!(
+        v[0],
+        json!({"name": "clock", "kind": "clock", "interval_s": 1.0, "ok": null, "error": null,
+               "polled_at": null, "age_s": null, "values": null})
+    );
+    let d = &v[1];
+    assert_eq!(d["name"], "d");
+    assert_eq!(d["interval_s"], 5.0);
+    assert_eq!(d["ok"], true);
+    assert_eq!(d["error"], Json::Null, "an error from an earlier poll is not shown once a poll succeeds");
+    assert_eq!(d["values"], 3);
+    assert!(d["polled_at"].is_string());
+    assert_eq!(d["age_s"], 0);
+    assert!(d.get("settings").is_none());
+}
+
+#[tokio::test]
+async fn settings_page_is_html_with_the_title_and_links() {
+    let app = router(hub(false));
+    let (status, headers, body) = get(&app, "/settings").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(header(&headers, "content-type").starts_with("text/html"));
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(html.contains("<title>Settings · Test hub</title>"), "{html}");
+    assert!(html.contains(r#"href="/""#) && html.contains(r#"href="/flash/""#));
+    assert!(html.contains("/api/settings"));
+    assert!(!html.contains(r#"id="token""#), "no token input without PEEPHOLE_API_TOKEN");
+    let (_, _, body) = get(&router(hub_with(token_settings(false), CONFIG)), "/settings").await;
+    assert!(String::from_utf8(body.to_vec()).unwrap().contains(r#"id="token""#));
+    let (_, _, body) = get(&app, "/").await;
+    assert!(String::from_utf8(body.to_vec()).unwrap().contains(r#"href="/settings""#));
 }

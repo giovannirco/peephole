@@ -39,9 +39,10 @@ async fn run() -> Result<()> {
     let registry = state::open_registry(&settings, &cfg)?;
     let (events, receiver) = broadcast::channel(EVENT_BACKLOG);
     let holds = state::spawn_event_holds(registry.clone(), receiver);
+    let intervals = state::intervals(&plugins);
     let scheduler = scheduler::run(plugins, store.clone(), events);
     let (pages, plugin_count) = (cfg.pages.len(), cfg.plugins.len());
-    let app = router(Hub::new(&settings, cfg, store, registry, scheduler.triggers()));
+    let app = router(Hub::new(&settings, cfg, store, registry, intervals, scheduler.triggers()));
     let listener = tokio::net::TcpListener::bind(settings.listen)
         .await
         .with_context(|| format!("binding PEEPHOLE_LISTEN {}", settings.listen))?;

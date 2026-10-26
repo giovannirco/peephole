@@ -1,10 +1,13 @@
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
 use peephole_core::scheduler::PollTriggers;
-use peephole_core::{Config, Event, Page, Registry, Store};
+use peephole_core::{Config, Event, Page, Plugin, Registry, Store};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
@@ -23,15 +26,33 @@ pub struct Hub {
     pub public_url: Option<String>,
     pub polls: PollTriggers,
     pub api_token: Option<ApiToken>,
+    /// Poll interval per plugin name, from the built plugins.
+    pub intervals: BTreeMap<String, Duration>,
+    pub listen: SocketAddr,
+    pub config_path: Option<PathBuf>,
+    pub state_file: bool,
+    pub env: Vec<(&'static str, bool)>,
 }
 
 impl Hub {
-    pub fn new(settings: &Settings, cfg: Config, store: Store, registry: Registry, polls: PollTriggers) -> AppState {
+    pub fn new(
+        settings: &Settings,
+        cfg: Config,
+        store: Store,
+        registry: Registry,
+        intervals: BTreeMap<String, Duration>,
+        polls: PollTriggers,
+    ) -> AppState {
         Arc::new(Self {
             cfg,
             store,
             registry,
             polls,
+            intervals,
+            listen: settings.listen,
+            config_path: settings.config.clone(),
+            state_file: settings.state_file.is_some(),
+            env: settings.env_status(),
             demo: settings.demo,
             firmware_dir: settings.firmware_dir.clone(),
             public_url: settings.public_url.clone(),
@@ -63,6 +84,11 @@ impl Hub {
             })
             .collect()
     }
+}
+
+/// Each built plugin's poll interval by name.
+pub fn intervals(plugins: &[Arc<dyn Plugin>]) -> BTreeMap<String, Duration> {
+    plugins.iter().map(|p| (p.name().to_owned(), p.interval())).collect()
 }
 
 pub fn open_registry(settings: &Settings, cfg: &Config) -> Result<Registry> {
@@ -117,7 +143,8 @@ mod tests {
 
     #[test]
     fn page_lookup_by_name_and_index() {
-        let hub = Hub::new(&settings(), config(), Store::new(), Registry::new(0), PollTriggers::default());
+        let hub =
+            Hub::new(&settings(), config(), Store::new(), Registry::new(0), BTreeMap::new(), PollTriggers::default());
         assert_eq!(hub.page_names(), vec!["a", "b"]);
         assert_eq!(hub.page_index("b"), Some(1));
         assert_eq!(hub.page_index("zz"), None);
@@ -130,7 +157,7 @@ mod tests {
         let store = Store::new();
         store.set("d/_ok", Value::Number(0.0));
         store.set("clock/_ok", Value::Number(1.0));
-        let hub = Hub::new(&settings(), config(), store, Registry::new(0), PollTriggers::default());
+        let hub = Hub::new(&settings(), config(), store, Registry::new(0), BTreeMap::new(), PollTriggers::default());
         assert_eq!(hub.sources(), vec![("clock".to_owned(), true), ("d".to_owned(), false)]);
     }
 
