@@ -152,6 +152,22 @@ pub fn redact_url(text: &str) -> String {
     format!("{scheme}://{host}{}", redact_query(tail))
 }
 
+/// Free text (an error message) with every URL in it passed through [`redact_url`].
+pub fn redact_text(text: &str) -> String {
+    let is_edge = |c: char| c.is_whitespace() || "()<>\"'".contains(c);
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("://") {
+        let start = rest[..at].rfind(is_edge).map_or(0, |i| i + 1);
+        let end = rest[at..].find(is_edge).map_or(rest.len(), |i| at + i);
+        out.push_str(&rest[..start]);
+        out.push_str(&redact_url(&rest[start..end]));
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn redact_query(tail: &str) -> String {
     let Some((path, query)) = tail.split_once('?') else { return tail.to_owned() };
     let (query, fragment) = query.split_once('#').map_or((query, None), |(q, f)| (q, Some(f)));
@@ -262,6 +278,16 @@ plugins:
     fn text_that_only_looks_like_a_placeholder_is_kept() {
         let s = settings_of("plugins: [{kind: x, a: __PEEPHOLE_ENV_99__}]\n");
         assert_eq!(s["a"], "__PEEPHOLE_ENV_99__");
+    }
+
+    #[test]
+    fn urls_inside_free_text_lose_their_secrets() {
+        assert_eq!(
+            redact_text("error sending request for url (https://u:p@h/x?token=t1): refused"),
+            "error sending request for url (https://h/x?token=••••): refused"
+        );
+        assert_eq!(redact_text("timed out"), "timed out");
+        assert_eq!(redact_text("a http://x:y@h b \"ftp://k@f/\""), "a http://h b \"ftp://f/\"");
     }
 
     #[test]

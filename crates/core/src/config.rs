@@ -8,7 +8,7 @@ use crate::page::Page;
 
 mod redact;
 
-pub use redact::{RedactedPlugin, redact, redact_url};
+pub use redact::{RedactedPlugin, redact, redact_text, redact_url};
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
