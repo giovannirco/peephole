@@ -7,7 +7,7 @@ use http_body_util::BodyExt;
 use peephole_core::scheduler::{self, PollTriggers, Scheduler};
 use peephole_core::{Config, Registry, Store, Value};
 use peephole_hub::routes::router;
-use peephole_hub::settings::Settings;
+use peephole_hub::settings::{ApiToken, Settings};
 use peephole_hub::state::{AppState, Hub};
 use serde_json::{Value as Json, json};
 use tower::ServiceExt;
@@ -35,6 +35,7 @@ fn settings(demo: bool, firmware_dir: Option<PathBuf>, public_url: Option<&str>)
         state_file: None,
         firmware_dir,
         public_url: public_url.map(str::to_owned),
+        api_token: None,
     }
 }
 
@@ -74,7 +75,20 @@ fn hub(demo: bool) -> AppState {
 }
 
 async fn call(app: &Router, method: Method, uri: &str, body: Option<Json>) -> (StatusCode, HeaderMap, Bytes) {
+    call_as(app, method, uri, body, None).await
+}
+
+async fn call_as(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    body: Option<Json>,
+    authorization: Option<&str>,
+) -> (StatusCode, HeaderMap, Bytes) {
     let mut req = Request::builder().method(method).uri(uri);
+    if let Some(value) = authorization {
+        req = req.header("authorization", value);
+    }
     let body = match body {
         Some(b) => {
             req = req.header("content-type", "application/json");
@@ -331,7 +345,7 @@ async fn api_config_describes_the_hub() {
     assert_eq!(
         json_of(&body),
         json!({
-            "title": "Test hub", "cycle_s": 0, "stale_s": 60, "demo": true,
+            "title": "Test hub", "cycle_s": 0, "stale_s": 60, "demo": true, "auth": false,
             "plugins": [{"name": "clock", "kind": "clock"}, {"name": "d", "kind": "demo"}]
         })
     );
@@ -504,4 +518,73 @@ async fn a_page_list_with_unknown_names_is_400_naming_them() {
     assert!(body["error"].as_str().unwrap().contains("zz"));
     let (status, _) = post(&app, "/api/devices/ghost/pages", Some(json!({"pages": []}))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+const TOKEN: &str = "tok-0123456789";
+
+fn token_settings(demo: bool) -> Settings {
+    Settings { api_token: Some(ApiToken::new(TOKEN)), ..settings(demo, None, None) }
+}
+
+async fn post_as(app: &Router, uri: &str, body: Option<Json>, authorization: Option<&str>) -> (StatusCode, Json) {
+    let (status, _, bytes) = call_as(app, Method::POST, uri, body, authorization).await;
+    (status, serde_json::from_slice(&bytes).unwrap_or(Json::Null))
+}
+
+#[tokio::test]
+async fn with_a_token_every_post_needs_the_bearer_header() {
+    let app = router(hub_with(token_settings(false), CONFIG));
+    register(&app, "m1").await;
+    let wrong = format!("Bearer {TOKEN}x");
+    let short = format!("Bearer {}", &TOKEN[1..]);
+    for authorization in [None, Some("Bearer nope"), Some(wrong.as_str()), Some(short.as_str()), Some(TOKEN)] {
+        let (status, body) = post_as(&app, "/api/devices/m1/next", None, authorization).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{authorization:?}");
+        assert!(body["error"].is_string(), "{authorization:?}");
+    }
+    let (_, _, body) = get(&app, "/api/devices/m1").await;
+    assert_eq!(json_of(&body)["page"], 0);
+    let bearer = format!("Bearer {TOKEN}");
+    let (status, dev) = post_as(&app, "/api/devices/m1/next", None, Some(&bearer)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dev["page"], 1);
+}
+
+#[tokio::test]
+async fn with_a_token_poll_now_is_accepted_with_the_bearer_header() {
+    let (running, scheduler) = running_hub(SLOW);
+    let state = Hub::new(
+        &token_settings(false),
+        running.cfg.clone(),
+        running.store.clone(),
+        Registry::new(0),
+        running.polls.clone(),
+    );
+    let app = router(state);
+    let (status, _) = post_as(&app, "/api/plugins/d/poll", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = post_as(&app, "/api/plugins/d/poll", None, Some(&format!("Bearer {TOKEN}"))).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    scheduler.abort();
+}
+
+#[tokio::test]
+async fn with_a_token_reads_stay_open_and_config_reports_auth() {
+    let app = router(hub_with(token_settings(false), CONFIG));
+    for uri in ["/", "/api/pages", "/api/devices", "/api/values", "/healthz"] {
+        let (status, _, _) = get(&app, uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+    }
+    let (_, _, body) = get(&app, "/api/config").await;
+    assert_eq!(json_of(&body)["auth"], true);
+}
+
+#[tokio::test]
+async fn demo_mode_answers_403_even_with_a_token() {
+    let app = router(hub_with(token_settings(true), CONFIG));
+    register(&app, "m1").await;
+    for authorization in [None, Some(format!("Bearer {TOKEN}"))] {
+        let (status, _) = post_as(&app, "/api/devices/m1/next", None, authorization.as_deref()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{authorization:?}");
+    }
 }

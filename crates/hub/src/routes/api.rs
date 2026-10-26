@@ -94,6 +94,7 @@ pub async fn config(State(state): State<AppState>) -> Json<Json_> {
         "cycle_s": state.cfg.hub.cycle_s,
         "stale_s": state.cfg.hub.stale_s,
         "demo": state.demo,
+        "auth": state.api_token.is_some(),
         "plugins": plugins,
     }))
 }

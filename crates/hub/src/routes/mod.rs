@@ -5,6 +5,7 @@ mod frame;
 mod plugins;
 
 use axum::extract::{FromRequest, Request, State};
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -41,7 +42,7 @@ pub fn router(state: AppState) -> Router {
         .route("/flash/manifest.json", get(flash::manifest))
         .merge(firmware)
         .fallback(not_found)
-        .layer(middleware::from_fn_with_state(state.clone(), read_only_in_demo))
+        .layer(middleware::from_fn_with_state(state.clone(), guard_posts))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -88,10 +89,25 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for JsonBody<T> {
     }
 }
 
-async fn read_only_in_demo(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    if state.demo && req.method() == Method::POST {
+/// Every `POST` is refused in demo mode (403) and, when `PEEPHOLE_API_TOKEN` is set, needs its bearer token (401).
+async fn guard_posts(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    if req.method() != Method::POST {
+        return next.run(req).await;
+    }
+    if state.demo {
         return ApiError::new(StatusCode::FORBIDDEN, "this hub runs in demo mode: changes are disabled")
             .into_response();
+    }
+    if let Some(token) = &state.api_token {
+        let presented =
+            req.headers().get(AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
+        if !presented.is_some_and(|p| token.matches(p)) {
+            return ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "this hub needs Authorization: Bearer <PEEPHOLE_API_TOKEN>",
+            )
+            .into_response();
+        }
     }
     next.run(req).await
 }

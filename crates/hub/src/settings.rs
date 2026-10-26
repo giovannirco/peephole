@@ -1,3 +1,4 @@
+use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -17,6 +18,29 @@ pub struct Settings {
     pub state_file: Option<PathBuf>,
     pub firmware_dir: Option<PathBuf>,
     pub public_url: Option<String>,
+    pub api_token: Option<ApiToken>,
+}
+
+/// The bearer token every `POST` must carry when set. `Debug` never prints it.
+#[derive(Clone, PartialEq)]
+pub struct ApiToken(String);
+
+impl ApiToken {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    /// Compare without returning at the first differing byte.
+    pub fn matches(&self, presented: &str) -> bool {
+        let (want, got) = (self.0.as_bytes(), presented.as_bytes());
+        want.len() == got.len() && want.iter().zip(got).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+    }
+}
+
+impl fmt::Debug for ApiToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ApiToken(<set>)")
+    }
 }
 
 impl Settings {
@@ -49,6 +73,7 @@ impl Settings {
             state_file: get("PEEPHOLE_STATE").map(PathBuf::from),
             firmware_dir,
             public_url: get("PEEPHOLE_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_owned()),
+            api_token: get("PEEPHOLE_API_TOKEN").map(|t| ApiToken::new(t.trim())),
         })
     }
 
@@ -132,6 +157,24 @@ mod tests {
         assert_eq!(s.state_file, Some(PathBuf::from("/var/lib/peephole/devices.json")));
         assert_eq!(s.firmware_dir, Some(PathBuf::from(&fw)));
         assert_eq!(s.public_url.as_deref(), Some("https://peephole.example.invalid"));
+    }
+
+    #[test]
+    fn api_token_is_trimmed_and_never_printed() {
+        let s =
+            Settings::from_lookup(env(&[("PEEPHOLE_CONFIG", "/c"), ("PEEPHOLE_API_TOKEN", "  s3cret-tok  ")])).unwrap();
+        let token = s.api_token.as_ref().expect("token set");
+        assert!(token.matches("s3cret-tok"));
+        assert!(!token.matches("s3cret-to"));
+        assert!(!token.matches("s3cret-tok "));
+        assert!(!format!("{s:?}").contains("s3cret"), "{s:?}");
+    }
+
+    #[test]
+    fn an_empty_api_token_is_unset() {
+        let s = Settings::from_lookup(env(&[("PEEPHOLE_CONFIG", "/c"), ("PEEPHOLE_API_TOKEN", "   ")])).unwrap();
+        assert!(s.api_token.is_none());
+        assert!(Settings::from_lookup(env(&[("PEEPHOLE_CONFIG", "/c")])).unwrap().api_token.is_none());
     }
 
     #[test]

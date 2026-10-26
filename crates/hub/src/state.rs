@@ -8,7 +8,7 @@ use peephole_core::{Config, Event, Page, Registry, Store};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::settings::Settings;
+use crate::settings::{ApiToken, Settings};
 
 pub type AppState = Arc<Hub>;
 
@@ -22,6 +22,7 @@ pub struct Hub {
     pub firmware_dir: Option<PathBuf>,
     pub public_url: Option<String>,
     pub polls: PollTriggers,
+    pub api_token: Option<ApiToken>,
 }
 
 impl Hub {
@@ -34,6 +35,7 @@ impl Hub {
             demo: settings.demo,
             firmware_dir: settings.firmware_dir.clone(),
             public_url: settings.public_url.clone(),
+            api_token: settings.api_token.clone(),
         })
     }
 
@@ -100,6 +102,7 @@ mod tests {
             state_file: None,
             firmware_dir: None,
             public_url: None,
+            api_token: None,
         }
     }
 
