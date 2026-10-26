@@ -50,6 +50,30 @@ pub struct Items {
     pub prefix: String,
     #[serde(default)]
     pub fields: Vec<Field>,
+    #[serde(default)]
+    pub count: Vec<Count>,
+}
+
+impl Items {
+    fn validate(&self) -> anyhow::Result<()> {
+        if self.count.iter().any(|c| crate::key::sanitize(&c.key) == "count") {
+            anyhow::bail!(
+                "items {}: a count may not be named count (it would replace {}_count)",
+                self.prefix,
+                self.prefix
+            );
+        }
+        self.fields.iter().try_for_each(Field::validate)
+    }
+}
+
+/// `<prefix>_<key>`: how many elements hold exactly `equals` (compared as JSON) at `pointer`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Count {
+    pub key: String,
+    pub pointer: String,
+    pub equals: serde_json::Value,
 }
 
 impl Field {
@@ -87,7 +111,8 @@ pub struct HttpJson {
 impl HttpJson {
     pub fn new(name: &str, settings: Settings) -> anyhow::Result<Self> {
         let interval = crate::period::seconds(settings.interval_s, "interval_s")?;
-        settings.fields.iter().chain(settings.items.iter().flat_map(|i| &i.fields)).try_for_each(Field::validate)?;
+        settings.fields.iter().try_for_each(Field::validate)?;
+        settings.items.iter().try_for_each(Items::validate)?;
         let client = crate::http::client(crate::http::DEFAULT_TIMEOUT.min(interval), &settings.headers, None, false)?;
         Ok(Self {
             name: name.to_owned(),
@@ -185,7 +210,12 @@ fn read_items(partial: &mut crate::partial::Partial, body: &serde_json::Value, i
             read(partial, element, field, format!("{prefix}/{label}/{}", crate::key::sanitize(&field.key)));
         }
     }
-    partial.ok([(format!("{prefix}_count"), Value::Number(elements.len() as f64))]);
+    let counts = items.count.iter().map(|count| {
+        let matching = elements.iter().filter(|element| element.pointer(&count.pointer) == Some(&count.equals)).count();
+        (format!("{prefix}_{}", crate::key::sanitize(&count.key)), Value::Number(matching as f64))
+    });
+    let total = (format!("{prefix}_count"), Value::Number(elements.len() as f64));
+    partial.ok(std::iter::once(total).chain(counts));
 }
 
 #[async_trait]
@@ -397,13 +427,56 @@ items:
         assert!(err.contains("host") && err.contains("/nope"), "{err}");
     }
 
+    #[tokio::test]
+    async fn count_tallies_elements_whose_value_equals_the_json_given() {
+        let body = serde_json::json!({"nodes": [
+            {"cluster": "cluster-7248309b5e2a", "name": "node-01", "ready": true, "pods": 63},
+            {"cluster": "cluster-7248309b5e2a", "name": "node-02", "ready": false, "pods": 12},
+            {"cluster": "cluster-a", "name": "node-03", "ready": true, "pods": 63},
+            {"cluster": "cluster-a", "name": "node-04", "ready": "true"}
+        ]});
+        let settings = r#"
+items:
+  - pointer: /nodes
+    key: /name
+    prefix: node
+    count:
+      - {key: ready, pointer: /ready, equals: true}
+      - {key: in a, pointer: /cluster, equals: cluster-a}
+      - {key: busy, pointer: /pods, equals: 63}
+"#;
+        let got = poll(body, settings).await;
+        assert_eq!(got["node_count"], Value::Number(4.0));
+        assert_eq!(got["node_ready"], Value::Number(2.0));
+        assert_eq!(got["node_in-a"], Value::Number(2.0));
+        assert_eq!(got["node_busy"], Value::Number(2.0));
+        assert_eq!(got["_fields_failed"], Value::Number(0.0));
+    }
+
+    #[test]
+    fn a_count_named_count_is_refused() {
+        let err =
+            build("items: [{pointer: /n, key: /name, prefix: node, count: [{key: count, pointer: /a, equals: 1}]}]")
+                .err()
+                .unwrap()
+                .to_string();
+        assert!(err.contains("node") && err.contains("count"), "{err}");
+    }
+
     fn build(yaml: &str) -> anyhow::Result<HttpJson> {
         HttpJson::new("j", serde_yaml::from_str(&format!("url: 'http://example.invalid'\n{yaml}")).unwrap())
     }
 
     #[test]
-    fn over_on_a_text_field_is_refused_naming_the_field() {
+    fn over_on_a_text_field_is_refused_naming_the_field_at_the_top_and_in_items() {
         let err = build("fields: [{key: room, pointer: /a, kind: text, over: /b}]").err().unwrap().to_string();
+        assert!(err.contains("room") && err.contains("over"), "{err}");
+        let err = build(
+            "items: [{pointer: /h, key: /name, prefix: h, fields: [{key: room, pointer: /a, kind: text, over: /b}]}]",
+        )
+        .err()
+        .unwrap()
+        .to_string();
         assert!(err.contains("room") && err.contains("over"), "{err}");
     }
 
