@@ -13,6 +13,7 @@ mod http;
 pub mod http_json;
 mod insecure_tls;
 mod key;
+pub mod kubernetes;
 pub mod mempool;
 mod partial;
 mod period;
