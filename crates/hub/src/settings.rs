@@ -8,6 +8,16 @@ use peephole_core::Config;
 const DEMO_CONFIG: &str = include_str!("../../../examples/demo.yaml");
 const DEMO_KINDS: &[&str] = &["clock", "demo"];
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
+/// Every variable the hub reads, in the order the settings panel lists them.
+pub const VARIABLES: &[&str] = &[
+    "PEEPHOLE_CONFIG",
+    "PEEPHOLE_LISTEN",
+    "PEEPHOLE_DEMO",
+    "PEEPHOLE_STATE",
+    "PEEPHOLE_FIRMWARE_DIR",
+    "PEEPHOLE_PUBLIC_URL",
+    "PEEPHOLE_API_TOKEN",
+];
 
 /// Everything the hub reads from the environment, resolved once at startup.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +29,8 @@ pub struct Settings {
     pub firmware_dir: Option<PathBuf>,
     pub public_url: Option<String>,
     pub api_token: Option<ApiToken>,
+    /// The variables of [`VARIABLES`] that were set (non-empty).
+    pub set_variables: Vec<&'static str>,
 }
 
 /// The bearer token every `POST` must carry when set. `Debug` never prints it.
@@ -74,7 +86,13 @@ impl Settings {
             firmware_dir,
             public_url: get("PEEPHOLE_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_owned()),
             api_token: get("PEEPHOLE_API_TOKEN").map(|t| ApiToken::new(t.trim())),
+            set_variables: VARIABLES.iter().copied().filter(|v| get(v).is_some()).collect(),
         })
+    }
+
+    /// Each variable the hub reads and whether it was set; never the values.
+    pub fn env_status(&self) -> Vec<(&'static str, bool)> {
+        VARIABLES.iter().map(|v| (*v, self.set_variables.contains(v))).collect()
     }
 
     /// Read the config file (or the built-in demo config in demo mode when the file is absent).
@@ -175,6 +193,29 @@ mod tests {
         let s = Settings::from_lookup(env(&[("PEEPHOLE_CONFIG", "/c"), ("PEEPHOLE_API_TOKEN", "   ")])).unwrap();
         assert!(s.api_token.is_none());
         assert!(Settings::from_lookup(env(&[("PEEPHOLE_CONFIG", "/c")])).unwrap().api_token.is_none());
+    }
+
+    #[test]
+    fn env_status_lists_every_known_variable_and_whether_it_was_set() {
+        let s = Settings::from_lookup(env(&[
+            ("PEEPHOLE_CONFIG", "/c"),
+            ("PEEPHOLE_API_TOKEN", "t"),
+            ("PEEPHOLE_STATE", " "),
+            ("OTHER", "x"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            s.env_status(),
+            vec![
+                ("PEEPHOLE_CONFIG", true),
+                ("PEEPHOLE_LISTEN", false),
+                ("PEEPHOLE_DEMO", false),
+                ("PEEPHOLE_STATE", false),
+                ("PEEPHOLE_FIRMWARE_DIR", false),
+                ("PEEPHOLE_PUBLIC_URL", false),
+                ("PEEPHOLE_API_TOKEN", true),
+            ]
+        );
     }
 
     #[test]

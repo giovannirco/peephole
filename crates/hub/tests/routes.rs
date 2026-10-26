@@ -36,6 +36,7 @@ fn settings(demo: bool, firmware_dir: Option<PathBuf>, public_url: Option<&str>)
         firmware_dir,
         public_url: public_url.map(str::to_owned),
         api_token: None,
+        set_variables: Vec::new(),
     }
 }
 

@@ -103,6 +103,7 @@ mod tests {
             firmware_dir: None,
             public_url: None,
             api_token: None,
+            set_variables: Vec::new(),
         }
     }
 
