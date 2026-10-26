@@ -1,8 +1,11 @@
-# Peephole: a whole homelab on a 320x170 screen. Thirteen pages fed by Prometheus
+# Peephole: a whole homelab on a 320x170 screen. Twenty-nine pages: thirteen fed by Prometheus
 # (kube-state-metrics, node exporter, a Proxmox exporter, UnPoller, nvidia-smi, blackbox probes,
-# Velero, CloudNativePG, a Cloudflare exporter) and a mempool.space-compatible API.
-# Names (clusters, hosts, zones) are placeholders: rename the `items` and `rename` maps to yours.
-# Env: PROMETHEUS_URL (…/prometheus), MEMPOOL_URL, PEEPHOLE_TZ.
+# Velero, CloudNativePG, a Cloudflare exporter) and a mempool.space-compatible API, sixteen fed by
+# direct plugins (Proxmox, Kubernetes, UniFi Network, Uptime Kuma, CLIProxyAPI, Home Assistant,
+# Technitium, Forgejo, GitHub, WAHA, Homepage, Homarr, Radarr/Sonarr/Lidarr/Prowlarr, qBittorrent,
+# job-scout, X). Names (clusters, hosts, zones, guests, devices) are placeholders: rename the `items`
+# and `rename` maps to yours; every URL and credential is an environment variable.
+# With this many pages give each device a page list (POST /api/devices/{id}/pages or the /settings panel).
 hub:
   title: Homelab
   cycle_s: 12
@@ -100,6 +103,115 @@ plugins:
       - {key: velero_age, expr: 'time() - max by (cluster) (velero_backup_last_successful_timestamp{schedule="velero-daily"})', label: cluster}
       - {key: cnpg_age, expr: 'time() - min by (cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)', label: cluster}
       - {key: vzdump_age, expr: 'time() - max by (node) (pve_backup_last_run_timestamp_seconds)', label: node}
+
+  # v0.2: direct readers. Every host and credential comes from the environment; the hub refuses to start on a missing variable.
+  - kind: proxmox
+    name: pve
+    interval_s: 30
+    hosts:
+      - {name: pve-a, url: "${PROXMOX_A_URL}", token_id: "${PROXMOX_A_TOKEN_ID}", token_secret: "${PROXMOX_A_TOKEN_SECRET}", insecure: true}
+      - {name: pve-b, url: "${PROXMOX_B_URL}", token_id: "${PROXMOX_B_TOKEN_ID}", token_secret: "${PROXMOX_B_TOKEN_SECRET}", insecure: true}
+      - {name: pve-c, url: "${PROXMOX_C_URL}", token_id: "${PROXMOX_C_TOKEN_ID}", token_secret: "${PROXMOX_C_TOKEN_SECRET}", insecure: true}
+
+  - kind: kubernetes
+    name: k8s
+    interval_s: 30
+    clusters:
+      - {name: local, in_cluster: true}
+
+  - kind: unifi_network
+    name: net
+    url: "${UNIFI_URL}"
+    username: "${UNIFI_USERNAME}"
+    password: "${UNIFI_PASSWORD}"
+    insecure: true
+    interval_s: 30
+
+  - kind: uptime_kuma
+    name: kuma
+    url: "${KUMA_URL}"
+    api_key: "${KUMA_API_KEY}"
+    interval_s: 60
+
+  - kind: cliproxyapi
+    name: ai
+    url: "${CLIPROXY_URL}"
+    management_key: "${CLIPROXY_MANAGEMENT_KEY}"
+    interval_s: 60
+
+  - kind: home_assistant
+    name: ha
+    url: "${HA_URL}"
+    token: "${HA_TOKEN}"
+    interval_s: 30
+    entities:
+      - {id: sensor.living_room_temperature, key: temp}
+      - {id: sensor.living_room_humidity, key: humidity}
+      - {id: sun.sun, key: sun}
+      - {id: todo.shopping_list, key: shopping}
+
+  - kind: technitium
+    name: dns
+    url: "${TECHNITIUM_URL}"
+    token: "${TECHNITIUM_TOKEN}"
+    interval_s: 60
+
+  - kind: forgejo
+    name: git
+    url: "${FORGEJO_URL}"
+    token: "${FORGEJO_TOKEN}"
+    interval_s: 300
+
+  - kind: github
+    name: gh
+    user: "${GITHUB_USER}"
+    interval_s: 600
+
+  - kind: waha
+    name: wa
+    interval_s: 60
+    servers:
+      - {name: line-a, url: "${WAHA_A_URL}", api_key: "${WAHA_A_API_KEY}"}
+      - {name: line-b, url: "${WAHA_B_URL}", api_key: "${WAHA_B_API_KEY}"}
+      - {name: line-c, url: "${WAHA_C_URL}", api_key: "${WAHA_C_API_KEY}"}
+
+  - kind: homepage
+    name: home
+    url: "${HOMEPAGE_URL}"
+    interval_s: 60
+
+  - kind: homarr
+    name: homarr
+    url: "${HOMARR_URL}"
+    api_key: "${HOMARR_API_KEY}"
+    interval_s: 120
+
+  - kind: servarr
+    name: media
+    interval_s: 60
+    apps:
+      - {name: movies, kind: radarr, url: "${RADARR_URL}", api_key: "${RADARR_API_KEY}"}
+      - {name: tv, kind: sonarr, url: "${SONARR_URL}", api_key: "${SONARR_API_KEY}"}
+      - {name: music, kind: lidarr, url: "${LIDARR_URL}", api_key: "${LIDARR_API_KEY}"}
+      - {name: indexers, kind: prowlarr, url: "${PROWLARR_URL}", api_key: "${PROWLARR_API_KEY}"}
+
+  - kind: qbittorrent
+    name: qbit
+    interval_s: 30
+    servers:
+      - {name: arr, url: "${QBIT_URL}", username: "${QBIT_USERNAME}", password: "${QBIT_PASSWORD}"}
+
+  - kind: job_scout
+    name: jobs
+    url: "${JOB_SCOUT_URL}"
+    token: "${JOB_SCOUT_TOKEN}"
+    interval_s: 300
+
+  - kind: x
+    name: x
+    bearer_token: "${X_BEARER_TOKEN}"
+    username: "${X_USERNAME}"
+    interval_s: 900
 
 pages:
   - name: overview
@@ -301,3 +413,293 @@ pages:
           {kind: text, x: 10, y: 56, text: "{{clock/date}}", font: mid, color: text2},
           {kind: ticker, x: 10, y: 86, w: 288},
           {kind: text, x: 10, y: 116, text: "prometheus {{p/_ok|int}} · mempool {{btc/_ok|int}} · alerts {{p/alerts|int}}", font: small, color: muted}]}
+
+  - name: proxmox
+    title: Proxmox · direct
+    cards:
+      - {x: 6, y: 24, w: 100, h: 140, accent: web, title: pve-a, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 15, bind: pve/node/pve-a/cpu, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 15, bind: pve/node/pve-a/mem, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 8, y: 72, bind: pve/node/pve-a/load1, label: load, fmt: dec1, size: mid},
+          {kind: text, x: 54, y: 72, text: guests, font: small, color: text2},
+          {kind: text, x: 54, y: 84, text: "{{pve/node/pve-a/guests_running|int}} / {{pve/node/pve-a/guests_total|int}}", font: mid},
+          {kind: hbar, x: 8, y: 104, w: 84, bind: pve/node/pve-a/rootfs, label: root, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: spark, x: 8, y: 118, w: 84, h: 14, bind: pve/node/pve-a/cpu_history, color: web}]}
+      - {x: 110, y: 24, w: 100, h: 140, accent: web, title: pve-b, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 15, bind: pve/node/pve-b/cpu, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 15, bind: pve/node/pve-b/mem, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 8, y: 72, bind: pve/node/pve-b/load1, label: load, fmt: dec1, size: mid},
+          {kind: text, x: 54, y: 72, text: guests, font: small, color: text2},
+          {kind: text, x: 54, y: 84, text: "{{pve/node/pve-b/guests_running|int}} / {{pve/node/pve-b/guests_total|int}}", font: mid},
+          {kind: hbar, x: 8, y: 104, w: 84, bind: pve/node/pve-b/rootfs, label: root, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: spark, x: 8, y: 118, w: 84, h: 14, bind: pve/node/pve-b/cpu_history, color: web}]}
+      - {x: 214, y: 24, w: 100, h: 140, accent: web, title: pve-c, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 15, bind: pve/node/pve-c/cpu, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 15, bind: pve/node/pve-c/mem, label: mem, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 8, y: 72, bind: pve/node/pve-c/load1, label: load, fmt: dec1, size: mid},
+          {kind: text, x: 54, y: 72, text: guests, font: small, color: text2},
+          {kind: text, x: 54, y: 84, text: "{{pve/node/pve-c/guests_running|int}} / {{pve/node/pve-c/guests_total|int}}", font: mid},
+          {kind: hbar, x: 8, y: 104, w: 84, bind: pve/node/pve-c/rootfs, label: root, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: spark, x: 8, y: 118, w: 84, h: 14, bind: pve/node/pve-c/cpu_history, color: web}]}
+
+  - name: guests
+    title: Virtual machines
+    cards:
+      - {x: 6, y: 24, w: 308, h: 140, accent: web, widgets: [
+          {kind: rows, x: 8, y: 6, w: 290, row_h: 19,
+           items: [{key: vm-a}, {key: vm-b}, {key: vm-c}, {key: vm-d}, {key: vm-e}, {key: vm-f}, {key: vm-g}],
+           cols: [{kind: name, w: 92}, {kind: led, bind: "pve/guest/{}/status"}, {kind: num, bind: "pve/guest/{}/cpu", w: 44, fmt: pct}, {kind: bar, bind: "pve/guest/{}/mem", w: 110, color: web, thresholds: {warn: 0.85, bad: 0.95}}]}]}
+
+  - name: dns
+    title: DNS · last hour
+    cards:
+      - {x: 6, y: 24, w: 150, h: 70, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: dns/queries, label: queries, fmt: thousands, color: net},
+          {kind: kpi, x: 92, y: 4, bind: dns/clients, label: clients, fmt: int, size: mid},
+          {kind: bars, x: 8, y: 44, w: 134, h: 20, bind: dns/queries_series, color: net}]}
+      - {x: 162, y: 24, w: 152, h: 70, accent: net, widgets: [
+          {kind: gauge, x: 30, y: 52, r: 18, bind: dns/blocked_ratio, label: blocked, color: bad},
+          {kind: gauge, x: 80, y: 52, r: 18, bind: dns/cached_ratio, label: cached, color: ok},
+          {kind: kpi, x: 108, y: 4, bind: dns/nxdomain, label: nxdomain, fmt: int, size: mid},
+          {kind: kpi, x: 108, y: 36, bind: dns/servfail, label: servfail, fmt: int, size: mid, thresholds: {warn: 50, bad: 500}}]}
+      - {x: 6, y: 100, w: 308, h: 64, accent: net, widgets: [
+          {kind: text, x: 8, y: 4, text: "top blocked", font: small, color: text2},
+          {kind: text, x: 8, y: 18, text: "{{dns/top_blocked}} · {{dns/top_blocked_hits|int}}", font: mid},
+          {kind: text, x: 8, y: 38, text: "top domain", font: small, color: text2},
+          {kind: text, x: 8, y: 50, text: "{{dns/top_domain}} · {{dns/top_domain_hits|int}}", font: small},
+          {kind: kpi, x: 230, y: 4, bind: dns/zones, label: zones, fmt: int, size: mid},
+          {kind: kpi, x: 230, y: 34, bind: dns/cached_entries, label: cache entries, fmt: auto, size: mid}]}
+
+  - name: dashboards
+    title: Dashboards
+    cards:
+      - {x: 6, y: 24, w: 200, h: 140, accent: web, title: homepage, widgets: [
+          {kind: text, x: 8, y: 18, text: services checked, font: small, color: text2},
+          {kind: text, x: 8, y: 32, text: "{{home/online|int}} / {{home/checked|int}} up", font: num},
+          {kind: kpi, x: 120, y: 18, bind: home/services_total, label: services, fmt: int, size: mid},
+          {kind: kpi, x: 120, y: 52, bind: home/groups, label: groups, fmt: int, size: mid},
+          {kind: text, x: 8, y: 72, text: "offline", font: small, color: text2},
+          {kind: ticker, x: 8, y: 86, w: 180, bind: home/offline_list, color: bad},
+          {kind: text, x: 8, y: 108, text: "slowest {{home/slowest}} · {{home/slowest_ms|int}} ms", font: small, color: text2}]}
+      - {x: 210, y: 24, w: 104, h: 140, accent: ai, title: homarr, widgets: [
+          {kind: kpi, x: 8, y: 18, bind: homarr/boards, label: boards, fmt: int},
+          {kind: kpi, x: 8, y: 60, bind: homarr/apps, label: apps, fmt: int},
+          {kind: text, x: 8, y: 104, text: "{{homarr/version}}", font: small, color: text2}]}
+
+  - name: k8s
+    title: Kubernetes · direct
+    cards:
+      - {x: 6, y: 24, w: 100, h: 66, accent: web, widgets: [
+          {kind: text, x: 8, y: 4, text: nodes ready, font: small, color: text2},
+          {kind: text, x: 8, y: 20, text: "{{k8s/local/nodes_ready|int}} / {{k8s/local/nodes_total|int}}", font: num},
+          {kind: text, x: 8, y: 48, text: "{{k8s/local/version}}", font: small, color: text2}]}
+      - {x: 110, y: 24, w: 100, h: 66, accent: web, widgets: [
+          {kind: gauge, x: 26, y: 50, r: 15, bind: k8s/local/cpu, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 15, bind: k8s/local/mem, label: mem, color: web, thresholds: {warn: 0.85, bad: 0.95}}]}
+      - {x: 214, y: 24, w: 100, h: 66, accent: web, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: k8s/local/pods_running, label: pods running, fmt: int, color: web},
+          {kind: kpi, x: 8, y: 36, bind: k8s/local/pods_bad, label: not running, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 5}}]}
+      - {x: 6, y: 96, w: 308, h: 68, accent: web, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: k8s/local/restarts, label: restarts, fmt: auto, size: mid},
+          {kind: kpi, x: 80, y: 4, bind: k8s/local/warnings_1h, label: warnings 1h, fmt: int, size: mid, thresholds: {warn: 5, bad: 30}},
+          {kind: kpi, x: 170, y: 4, bind: k8s/local/pvc_bound, label: volumes bound, fmt: int, size: mid},
+          {kind: kpi, x: 250, y: 4, bind: k8s/local/namespaces, label: namespaces, fmt: int, size: mid},
+          {kind: ticker, x: 8, y: 44, w: 292, bind: k8s/local/last_warning, color: text2}]}
+
+  - name: gitops
+    title: GitOps
+    cards:
+      - {x: 6, y: 24, w: 152, h: 70, accent: ok, title: argo cd, widgets: [
+          {kind: text, x: 8, y: 18, text: "{{k8s/local/argo_synced|int}} / {{k8s/local/argo_apps|int}} synced", font: mid},
+          {kind: text, x: 8, y: 38, text: "{{k8s/local/argo_healthy|int}} healthy", font: small, color: text2},
+          {kind: kpi, x: 100, y: 16, bind: k8s/local/argo_degraded, label: degraded, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
+      - {x: 162, y: 24, w: 152, h: 70, accent: ok, title: flux, widgets: [
+          {kind: text, x: 8, y: 18, text: "{{k8s/local/flux_ready|int}} / {{k8s/local/flux_total|int}} ready", font: mid},
+          {kind: kpi, x: 100, y: 16, bind: k8s/local/flux_notready, label: not ready, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
+      - {x: 6, y: 100, w: 152, h: 64, accent: ok, title: certificates, widgets: [
+          {kind: kpi, x: 8, y: 16, bind: k8s/local/cert_min_days, label: soonest expiry, unit: d, fmt: int, size: mid, thresholds: {warn: 20, bad: 7, invert: true}},
+          {kind: text, x: 8, y: 46, text: "{{k8s/local/cert_soonest}}", font: small, color: text2}]}
+      - {x: 162, y: 100, w: 152, h: 64, accent: bad, title: attention, widgets: [
+          {kind: ticker, x: 8, y: 18, w: 136, bind: k8s/local/argo_worst, color: warn},
+          {kind: ticker, x: 8, y: 38, w: 136, bind: k8s/local/flux_worst, color: warn}]}
+
+  - name: unifi
+    title: UniFi · direct
+    cards:
+      - {x: 6, y: 24, w: 150, h: 64, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: net/wan/rx_bytes_s, label: WAN down, fmt: bytes, unit: "/s", color: net},
+          {kind: spark, x: 8, y: 42, w: 134, h: 16, bind: net/wan/rx_history, color: net}]}
+      - {x: 162, y: 24, w: 152, h: 64, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: net/wan/tx_bytes_s, label: WAN up, fmt: bytes, unit: "/s", color: net},
+          {kind: spark, x: 8, y: 42, w: 136, h: 16, bind: net/wan/tx_history, color: net}]}
+      - {x: 6, y: 94, w: 150, h: 70, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: net/www/latency_ms, label: latency, fmt: int, unit: ms, size: mid, thresholds: {warn: 30, bad: 80}},
+          {kind: kpi, x: 60, y: 4, bind: net/clients_wired, label: wired, fmt: int, size: mid},
+          {kind: kpi, x: 104, y: 4, bind: net/clients_wireless, label: wifi, fmt: int, size: mid},
+          {kind: gauge, x: 26, y: 50, r: 11, bind: net/gateway/cpu, label: gw cpu, color: net, thresholds: {warn: 0.7, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 11, bind: net/gateway/mem, label: gw mem, color: net, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: kpi, x: 104, y: 36, bind: net/clients_weak_signal, label: weak wifi, fmt: int, size: mid, thresholds: {warn: 2.5, bad: 6}}]}
+      - {x: 162, y: 94, w: 152, h: 70, accent: net, widgets: [
+          {kind: text, x: 8, y: 4, text: devices online, font: small, color: text2},
+          {kind: text, x: 8, y: 18, text: "{{net/devices_online|int}} / {{net/devices_total|int}}", font: mid},
+          {kind: dots, x: 8, y: 42, per_row: 8, bind: "net/device/{}/online", items: [{key: gw}, {key: agg}, {key: sw-a}, {key: sw-b}, {key: sw-c}, {key: ap-a}, {key: ap-b}, {key: ap-c}]},
+          {kind: kpi, x: 92, y: 4, bind: net/devices_upgradable, label: upgradable, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 5}}]}
+
+  - name: kuma
+    title: Uptime Kuma
+    cards:
+      - {x: 6, y: 24, w: 150, h: 70, accent: ok, widgets: [
+          {kind: text, x: 8, y: 4, text: monitors up, font: small, color: text2},
+          {kind: text, x: 8, y: 20, text: "{{kuma/monitors_up|int}} / {{kuma/monitors_total|int}}", font: num},
+          {kind: gauge, x: 118, y: 52, r: 16, bind: kuma/up_ratio, label: up, color: ok, thresholds: {warn: 0.95, bad: 0.8, invert: true}}]}
+      - {x: 162, y: 24, w: 152, h: 70, accent: ok, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: kuma/monitors_down, label: down, fmt: int, thresholds: {warn: 0.5, bad: 5}},
+          {kind: kpi, x: 80, y: 4, bind: kuma/avg_response_ms, label: avg response, unit: ms, fmt: int, size: mid},
+          {kind: kpi, x: 80, y: 36, bind: kuma/cert_min_days, label: cert expiry, unit: d, fmt: int, size: mid, thresholds: {warn: 20, bad: 7, invert: true}}]}
+      - {x: 6, y: 100, w: 308, h: 64, accent: bad, widgets: [
+          {kind: text, x: 8, y: 4, text: down now, font: small, color: text2},
+          {kind: ticker, x: 8, y: 18, w: 292, bind: kuma/down_list, color: bad},
+          {kind: text, x: 8, y: 40, text: "slowest {{kuma/slowest}} · {{kuma/slowest_ms|int}} ms", font: small, color: text2}]}
+
+  - name: ai-gateway
+    title: AI gateway · direct
+    cards:
+      - {x: 6, y: 24, w: 150, h: 70, accent: ai, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: ai/requests_total, label: requests, fmt: thousands, color: ai},
+          {kind: gauge, x: 118, y: 52, r: 16, bind: ai/success_ratio, label: ok, color: ai, thresholds: {warn: 0.98, bad: 0.9, invert: true}},
+          {kind: bars, x: 8, y: 44, w: 90, h: 20, bind: ai/requests_recent, color: ai}]}
+      - {x: 162, y: 24, w: 152, h: 70, accent: ai, widgets: [
+          {kind: text, x: 8, y: 4, text: accounts, font: small, color: text2},
+          {kind: text, x: 8, y: 18, text: "{{ai/accounts_available|int}} / {{ai/accounts_total|int}} available", font: mid},
+          {kind: kpi, x: 8, y: 38, bind: ai/accounts_disabled, label: disabled, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 2}},
+          {kind: kpi, x: 80, y: 38, bind: ai/requests_failed, label: failed, fmt: int, size: mid, thresholds: {warn: 10, bad: 50}}]}
+      - {x: 6, y: 100, w: 308, h: 64, accent: ai, widgets: [
+          {kind: rows, x: 8, y: 4, w: 292, row_h: 18,
+           items: [{key: claude}, {key: codex}, {key: antigravity}],
+           cols: [{kind: name, w: 90}, {kind: num, bind: "ai/provider/{}/requests", w: 70, fmt: int, unit: req}, {kind: num, bind: "ai/provider/{}/accounts", w: 60, fmt: int, unit: acc}]}]}
+
+  - name: home
+    title: Home Assistant
+    cards:
+      - {x: 6, y: 24, w: 150, h: 70, accent: ok, widgets: [
+          {kind: text, x: 8, y: 4, text: entities, font: small, color: text2},
+          {kind: text, x: 8, y: 20, text: "{{ha/entities_total|int}}", font: num},
+          {kind: kpi, x: 80, y: 4, bind: ha/unavailable, label: unavailable, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 5}},
+          {kind: text, x: 8, y: 50, text: "{{ha/version}}", font: small, color: text2}]}
+      - {x: 162, y: 24, w: 152, h: 70, accent: ok, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: ha/lights_on, label: lights, fmt: int, size: mid},
+          {kind: kpi, x: 60, y: 4, bind: ha/switches_on, label: switches, fmt: int, size: mid},
+          {kind: kpi, x: 112, y: 4, bind: ha/people_home, label: home, fmt: int, size: mid},
+          {kind: kpi, x: 8, y: 36, bind: ha/sensors, label: sensors, fmt: int, size: mid},
+          {kind: kpi, x: 60, y: 36, bind: ha/automations, label: autom., fmt: int, size: mid},
+          {kind: kpi, x: 112, y: 36, bind: ha/media_playing, label: playing, fmt: int, size: mid}]}
+      - {x: 6, y: 100, w: 308, h: 64, accent: ok, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: ha/entity/temp/value, label: temperature, fmt: temp, size: mid},
+          {kind: kpi, x: 90, y: 4, bind: ha/entity/humidity/value, label: humidity, unit: "%", fmt: int, size: mid},
+          {kind: text, x: 172, y: 4, text: sun, font: small, color: text2},
+          {kind: text, x: 172, y: 18, text: "{{ha/entity/sun/text}}", font: mid},
+          {kind: text, x: 8, y: 40, text: "shopping list {{ha/entity/shopping/value|int}} items", font: small, color: text2}]}
+
+  - name: git
+    title: Git
+    cards:
+      - {x: 6, y: 24, w: 152, h: 140, accent: web, title: forgejo, widgets: [
+          {kind: kpi, x: 8, y: 16, bind: git/repos, label: repos, fmt: int, color: web},
+          {kind: kpi, x: 80, y: 16, bind: git/open_issues, label: open issues, fmt: int, size: mid},
+          {kind: kpi, x: 80, y: 48, bind: git/open_prs, label: open PRs, fmt: int, size: mid},
+          {kind: kpi, x: 8, y: 56, bind: git/notifications, label: unread, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 10}},
+          {kind: text, x: 8, y: 92, text: last push, font: small, color: text2},
+          {kind: text, x: 8, y: 104, text: "{{git/latest_repo}} · {{git/latest_repo_age|duration}} ago", font: small}]}
+      - {x: 162, y: 24, w: 152, h: 140, accent: web, title: github, widgets: [
+          {kind: kpi, x: 8, y: 16, bind: gh/stars, label: stars, fmt: int, color: web},
+          {kind: kpi, x: 80, y: 16, bind: gh/followers, label: followers, fmt: int, size: mid},
+          {kind: kpi, x: 80, y: 48, bind: gh/public_repos, label: public repos, fmt: int, size: mid},
+          {kind: kpi, x: 8, y: 56, bind: gh/pushes_24h, label: pushes 24h, fmt: int, size: mid},
+          {kind: text, x: 8, y: 92, text: "top {{gh/top_repo}} · {{gh/top_repo_stars|int}}", font: small, color: text2},
+          {kind: text, x: 8, y: 104, text: "{{gh/last_push_repo}} · {{gh/last_push_age|duration}} ago", font: small}]}
+
+  - name: lines
+    title: WhatsApp · direct
+    cards:
+      - {x: 6, y: 24, w: 308, h: 70, accent: ok, widgets: [
+          {kind: rows, x: 8, y: 6, w: 292, row_h: 18,
+           items: [{key: line-a}, {key: line-b}, {key: line-c}],
+           cols: [{kind: name, w: 90}, {kind: led, bind: "wa/{}/up"}, {kind: num, bind: "wa/{}/sessions_working", w: 50, fmt: int, unit: ok}, {kind: num, bind: "wa/{}/sessions_total", w: 50, fmt: int, unit: all}, {kind: num, bind: "wa/{}/uptime", w: 60, fmt: duration}]}]}
+      - {x: 6, y: 100, w: 308, h: 64, accent: ok, widgets: [
+          {kind: text, x: 8, y: 4, text: sessions working, font: small, color: text2},
+          {kind: text, x: 8, y: 18, text: "{{wa/sessions_working|int}} / {{wa/sessions_total|int}}", font: num},
+          {kind: text, x: 150, y: 4, text: broken, font: small, color: text2},
+          {kind: ticker, x: 150, y: 18, w: 150, bind: wa/broken_list, color: bad}]}
+
+  - name: x
+    title: X
+    cards:
+      - {x: 6, y: 24, w: 150, h: 70, accent: text, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: x/followers, label: followers, fmt: thousands},
+          {kind: kpi, x: 80, y: 4, bind: x/following, label: following, fmt: int, size: mid},
+          {kind: kpi, x: 80, y: 36, bind: x/posts, label: posts, fmt: thousands, size: mid}]}
+      - {x: 162, y: 24, w: 152, h: 70, accent: text, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: x/last_post_likes, label: likes, fmt: int, size: mid},
+          {kind: kpi, x: 60, y: 4, bind: x/last_post_reposts, label: reposts, fmt: int, size: mid},
+          {kind: kpi, x: 112, y: 4, bind: x/last_post_views, label: views, fmt: auto, size: mid},
+          {kind: text, x: 8, y: 44, text: "{{x/last_post_age|duration}} ago", font: small, color: text2}]}
+      - {x: 6, y: 100, w: 308, h: 64, accent: text, widgets: [
+          {kind: text, x: 8, y: 4, text: latest post, font: small, color: text2},
+          {kind: ticker, x: 8, y: 20, w: 292, bind: x/last_post_text}]}
+
+  - name: media
+    title: Media stack
+    cards:
+      - {x: 6, y: 24, w: 308, h: 96, accent: web, widgets: [
+          {kind: text, x: 100, y: 2, text: queue, font: small, color: text2},
+          {kind: text, x: 170, y: 2, text: missing, font: small, color: text2},
+          {kind: text, x: 240, y: 2, text: issues, font: small, color: text2},
+          {kind: rows, x: 8, y: 16, w: 292, row_h: 19,
+           items: [{key: movies}, {key: tv}, {key: music}, {key: indexers}],
+           cols: [{kind: name, w: 66}, {kind: led, bind: "media/{}/up"}, {kind: num, bind: "media/{}/queue", w: 70, fmt: int}, {kind: num, bind: "media/{}/missing", w: 70, fmt: auto}, {kind: num, bind: "media/{}/health_issues", w: 60, fmt: int, thresholds: {warn: 0.5, bad: 3}}]}]}
+      - {x: 6, y: 124, w: 150, h: 40, accent: web, widgets: [
+          {kind: kpi, x: 8, y: 2, bind: media/imported_24h, label: imported 24h, fmt: int, size: mid},
+          {kind: kpi, x: 90, y: 2, bind: media/upcoming_7d, label: upcoming 7d, fmt: int, size: mid}]}
+      - {x: 162, y: 124, w: 152, h: 40, accent: web, widgets: [
+          {kind: kpi, x: 8, y: 2, bind: media/tv/episodes, label: episodes, fmt: thousands, size: mid},
+          {kind: kpi, x: 90, y: 2, bind: media/music/albums, label: albums, fmt: int, size: mid}]}
+
+  - name: torrents
+    title: qBittorrent
+    cards:
+      - {x: 6, y: 24, w: 150, h: 64, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: qbit/dl_speed, label: download, fmt: bytes, unit: "/s", color: net},
+          {kind: spark, x: 8, y: 42, w: 134, h: 16, bind: qbit/arr/dl_history, color: net}]}
+      - {x: 162, y: 24, w: 152, h: 64, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: qbit/up_speed, label: upload, fmt: bytes, unit: "/s", color: net},
+          {kind: spark, x: 8, y: 42, w: 136, h: 16, bind: qbit/arr/up_history, color: net}]}
+      - {x: 6, y: 94, w: 308, h: 70, accent: net, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: qbit/torrents, label: torrents, fmt: int, size: mid},
+          {kind: kpi, x: 70, y: 4, bind: qbit/arr/downloading, label: downloading, fmt: int, size: mid},
+          {kind: kpi, x: 140, y: 4, bind: qbit/arr/seeding, label: seeding, fmt: int, size: mid},
+          {kind: kpi, x: 200, y: 4, bind: qbit/errored, label: errored, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 5}},
+          {kind: kpi, x: 260, y: 4, bind: qbit/arr/stalled, label: stalled, fmt: int, size: mid},
+          {kind: kpi, x: 8, y: 36, bind: qbit/arr/global_ratio, label: ratio, fmt: dec1, size: mid},
+          {kind: kpi, x: 70, y: 36, bind: qbit/arr/free_space_bytes, label: free space, fmt: bytes, size: mid},
+          {kind: kpi, x: 140, y: 36, bind: qbit/arr/alltime_ul_bytes, label: ul total, fmt: bytes, size: mid},
+          {kind: kpi, x: 200, y: 36, bind: qbit/arr/alltime_dl_bytes, label: dl total, fmt: bytes, size: mid},
+          {kind: kpi, x: 260, y: 36, bind: qbit/arr/dht_nodes, label: dht, fmt: int, size: mid}]}
+
+  - name: jobs
+    title: Job search
+    cards:
+      - {x: 6, y: 24, w: 150, h: 70, accent: ai, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: jobs/positions/review/count, label: to review, fmt: int, color: ai},
+          {kind: kpi, x: 80, y: 4, bind: jobs/positions/applied/count, label: applied, fmt: int, size: mid},
+          {kind: kpi, x: 80, y: 36, bind: jobs/positions/interview/count, label: interviews, fmt: int, size: mid}]}
+      - {x: 162, y: 24, w: 152, h: 70, accent: ai, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: jobs/applied_week, label: this week, fmt: int, size: mid},
+          {kind: kpi, x: 90, y: 4, bind: jobs/upcoming_interviews, label: upcoming, fmt: int, size: mid},
+          {kind: kpi, x: 8, y: 36, bind: jobs/leads_needs_reply, label: leads to answer, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 5}},
+          {kind: kpi, x: 90, y: 36, bind: jobs/pending_approvals, label: approvals, fmt: int, size: mid}]}
+      - {x: 6, y: 100, w: 308, h: 64, accent: ai, widgets: [
+          {kind: kpi, x: 8, y: 4, bind: jobs/discovered_24h, label: seen 24h, fmt: auto, size: mid},
+          {kind: kpi, x: 80, y: 4, bind: jobs/passed_24h, label: passed, fmt: int, size: mid},
+          {kind: kpi, x: 150, y: 4, bind: jobs/queue, label: queue, fmt: int, size: mid},
+          {kind: kpi, x: 220, y: 4, bind: jobs/llm_tokens_24h, label: llm tokens 24h, fmt: auto, size: mid},
+          {kind: text, x: 8, y: 40, text: "{{jobs/processes|int}} live processes · {{jobs/untriaged|int}} untriaged · {{jobs/queue_failed|int}} failed jobs", font: small, color: text2}]}

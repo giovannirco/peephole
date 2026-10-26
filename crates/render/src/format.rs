@@ -5,6 +5,7 @@ pub fn format_value(v: f64, fmt: Fmt) -> String {
     if !v.is_finite() {
         return "--".into();
     }
+    let v = if v == 0.0 { 0.0 } else { v };
     match fmt {
         Fmt::Auto => auto(v),
         Fmt::Int => format!("{:.0}", v.round()),
@@ -128,6 +129,8 @@ mod tests {
             (-1234.0, Fmt::Auto, "-1.2k"),
             (-0.25, Fmt::Auto, "-0.25"),
             (12.6, Fmt::Int, "13"),
+            (-0.0, Fmt::Int, "0"),
+            (-0.0, Fmt::Auto, "0"),
             (97213.0, Fmt::Int, "97213"),
             (0.87, Fmt::Pct, "87%"),
             (1.5, Fmt::Pct, "150%"),

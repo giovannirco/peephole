@@ -26,6 +26,14 @@ Rules of the house:
 
 Register the kind in `crates/plugins/src/lib.rs` (`build` and `kinds`), add a settings struct that `serde` can read from the plugin's YAML entry, tests with `wiremock` fixtures (use `example.invalid` hosts), and a row in the README table.
 
+More rules learned while writing the direct plugins (v0.2):
+- **Settings structs holding a secret do not derive `Debug`.** Fields named like a credential (`key`, `token`, `password`, `secret`, `bearer`, `auth`, `header`, `cookie`) are masked on the `/settings` panel; a `${VAR}` reference shows as its variable name.
+- **Errors name the path, never the URL.** `crate::http::get` drops the URL from request errors (a token in a query string would otherwise land in `<plugin>/_error`). Do the same in your own request code (`reqwest::Error::without_url`).
+- **Aggregates, not people.** Never emit hostnames, MACs, IPs, phone ids, e-mail addresses, torrent or job titles: counts, ratios and the names you configured yourself.
+- **Least privilege is part of the plugin.** Document the smallest identity that works (Proxmox `PVEAuditor`, the Kubernetes ClusterRole in `docs/kubernetes-rbac.yaml`, a Technitium user with Dashboard view, a Forgejo token with `read:*` scopes) and refuse to need more.
+- **Verify the upstream shape before writing the fixture.** Read the API source or spec and cite it in the module doc comment; several APIs differ from their folklore (CLIProxyAPI v8 has no usage endpoint, GitHub public push events carry no commit count, X uses `post.fields`).
+- **Independent requests are `Partial` parts.** One failing part is logged and counted; the poll fails only when every part failed.
+
 ## Recipes without code
 
 Most sources are already covered by two generic plugins:

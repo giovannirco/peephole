@@ -2,7 +2,7 @@
 
 **A tiny window into your homelab.** Peephole renders dashboard pages for small ESP32 screens: a Rust hub polls your sources through plugins, draws every page as a frame, and the boards show the frames. The same frames appear in your browser, and the hub's flash page programs new boards over USB from the browser.
 
-> Status: v0.1, built in a day for one board (LilyGo T-Display-S3, 320×170). It works; expect sharp edges. v0.2 adds a settings panel, per-device page lists and an optional API token.
+> Status: v0.2, built in two evenings for one board (LilyGo T-Display-S3, 320×170). Twenty-two plugin kinds, a settings panel, page lists per device. It works; expect sharp edges. v0.2 adds a settings panel, per-device page lists and an optional API token.
 
 ![demo pages](docs/screenshots/demo.png)
 
@@ -21,7 +21,7 @@ Open http://localhost:8080/ : every page of `examples/demo.yaml`, refreshing eve
 
 ## Your own pages
 
-1. Copy `examples/homelab.yaml` (thirteen pages fed by Prometheus and a mempool API) or start from `examples/demo.yaml`.
+1. Copy `examples/homelab.yaml` (twenty-nine pages: Prometheus, a mempool API and sixteen direct plugins) or start from `examples/demo.yaml`.
 2. Point the plugins at your sources with environment variables (`${PROMETHEUS_URL}`, `${MEMPOOL_URL}`, …). The hub refuses to start when one is missing.
 3. Run it: `PEEPHOLE_CONFIG=my.yaml peephole`.
 4. Flash a board from `https://<hub>/flash/` (Chrome or Edge; WebSerial needs HTTPS), give it Wi-Fi when asked, open the board's own page and set the hub URL.
@@ -85,6 +85,22 @@ Values live in a store under `plugin/key[/label]`; widgets bind to keys. Widgets
 | `http_json` | numbers and text picked from any JSON endpoint by JSON pointer | a URL |
 | `mempool` | BTC price, tip height, fees, mempool, difficulty, hashrate, a 24 h price series | a mempool.space-compatible API |
 | `unifi_protect` | cameras online, snapshots as images, ring/motion events that bring a page to the front | a UniFi Protect console and an API key |
+| `proxmox` | per node cpu/mem/swap/rootfs/load/uptime/version with history series, guests and storage, from one or more PVE hosts or a cluster endpoint | an API token per host (`PVEAuditor` is enough) |
+| `kubernetes` | per cluster: node readiness and live CPU/memory ratios, pods and restarts, PVCs, warnings in the last hour, Argo CD sync/health, Flux readiness, cert-manager expiry | in-cluster ServiceAccount (RBAC in `docs/kubernetes-rbac.yaml`) or API URL + token + CA |
+| `unifi_network` | WAN up/throughput/latency with a series, gateway CPU/memory, clients per network and SSID, devices online/upgradable with load, temperature and firmware | a UniFi Network console (UniFi OS or classic) and a local read-only account |
+| `uptime_kuma` | monitors up/down/pending/maintenance, up ratio, per-monitor state, response time and certificate days, the down list, the slowest monitor, the soonest certificate | Uptime Kuma with the Prometheus API enabled and an API key |
+| `cliproxyapi` | requests total/success/failed with a recent series, requests and accounts per provider, available/disabled accounts, version | the management key (five wrong keys ban the client IP for 30 min) |
+| `home_assistant` | up, version, entity counts (unavailable, lights/switches on, people home, sensors, media playing, per domain), selected entities' value/text/unit/age/on | a long-lived access token |
+| `technitium` | DNS queries, blocked and cached ratios, chart series, top domains/blocked/clients | an API token for a user with Dashboard: view |
+| `forgejo` | version, repo totals, newest repos, open issues/PRs, unread notifications, failed Actions runs (24 h) | instance URL + a read-scoped token (Gitea works too) |
+| `github` | followers, stars/forks/issues/languages over your repos, last push, public activity (24 h), rate limit | a login (token optional, raises the limit) |
+| `waha` | per WAHA server: up, version, engine, tier, uptime, sessions working/status; totals and a broken-session list | `X-Api-Key` per server |
+| `homepage` | gethomepage groups and services; online/offline per service, group and in total from Homepage's own ping and siteMonitor checks | the Homepage URL (its host must be in `HOMEPAGE_ALLOWED_HOSTS`) |
+| `homarr` | Homarr version, boards (public or not), apps and how many have a ping URL | an API key from Homarr's API keys page |
+| `servarr` | Radarr/Sonarr/Lidarr/Prowlarr health, queue, library size, missing, upcoming and 24 h imports; Seerr request counts; Jellyfin sessions and library counts | each app's URL and API key |
+| `qbittorrent` | speeds with history, session/all-time bytes, ratio, free space, torrents by state and category | WebUI URL, username and password |
+| `job_scout` | job-search counts: positions by status, 30-day funnel, applied this week, queue, approvals, interviews, discovery, live processes, leads to answer | a job-scout URL and an `agent` token |
+| `x` | followers, following, posts, listed, latest post likes/reposts/replies/views and text | an app bearer token (Basic tier or above) |
 
 Writing one is a Rust trait with two methods; see [docs/plugins.md](docs/plugins.md). Most ideas do not need code: a `prometheus` or `http_json` recipe in YAML plus a screenshot is a welcome pull request.
 
