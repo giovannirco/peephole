@@ -5,7 +5,8 @@
 //! Codeberg responses, and <https://forgejo.org/docs/latest/user/api-usage/>:
 //! - `GET /api/v1/version` → `{"version"}`.
 //! - `GET /api/v1/repos/search?limit=&sort=updated&order=desc` → `{"ok", "data": [Repository]}`;
-//!   `size` is in KiB and `updated_at` carries the server's offset.
+//!   `size` is in KiB (`int(repo.Size / 1024)` in Forgejo's `services/convert/repository.go`)
+//!   and `updated_at` carries the server's offset.
 //! - `GET /api/v1/repos/issues/search?state=open&type=issues|pulls&limit=1` → the total in the
 //!   `X-Total-Count` header.
 //! - `GET /api/v1/notifications/new` → `{"new"}`.
@@ -60,6 +61,8 @@ fn default_top() -> usize {
 }
 
 const DAY_S: i64 = 86_400;
+/// Failed runs read per repository; more than this in a day still reads as this many.
+const RUNS_PAGE: u32 = 50;
 
 #[derive(Deserialize)]
 struct ServerVersion {
@@ -176,7 +179,7 @@ impl Forgejo {
     /// Failed runs of one repository in the last 24 h; `None` when the server answers 404.
     async fn failed_runs(&self, repo: &Repository, now: DateTime<Utc>) -> anyhow::Result<Option<usize>> {
         let mut url = self.url(&format!("repos/{}/actions/tasks", repo.full_name));
-        url.query_pairs_mut().append_pair("status", "failure").append_pair("limit", &self.repos_max.to_string());
+        url.query_pairs_mut().append_pair("status", "failure").append_pair("limit", &RUNS_PAGE.to_string());
         let path = url.path().to_owned();
         let response = self.client.get(url).send().await.with_context(|| format!("GET {path}"))?;
         let status = response.status();
