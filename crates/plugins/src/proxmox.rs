@@ -491,7 +491,7 @@ mod tests {
 
     fn qemu() -> serde_json::Value {
         json!([
-            {"vmid": 611, "name": "cddlabs-w1", "status": "running", "cpu": 0.25, "cpus": 4,
+            {"vmid": 611, "name": "web-1", "status": "running", "cpu": 0.25, "cpus": 4,
              "mem": 4 * 1024_u64.pow(3), "maxmem": 8 * 1024_u64.pow(3), "maxdisk": 107374182400_u64,
              "disk": 0, "diskread": 1, "diskwrite": 2, "netin": 3, "netout": 4, "uptime": 3600,
              "pid": 1234, "qmpstatus": "running", "template": 0, "tags": "k8s"},
@@ -560,9 +560,9 @@ mod tests {
 
     #[tokio::test]
     async fn reads_node_status_guests_and_storage() {
-        let a = host("cdd-prox-01").await;
+        let a = host("pve-1").await;
         let got = poll(&plugin(&[host_yaml("pve-a", &a)], "")).await;
-        let node = |k: &str| format!("node/cdd-prox-01/{k}");
+        let node = |k: &str| format!("node/pve-1/{k}");
         assert_eq!(n(&got, &node("cpu")), 0.125);
         assert_eq!(n(&got, &node("mem")), 0.25);
         assert_eq!(n(&got, &node("mem_used_bytes")), 8.0 * GIB);
@@ -577,28 +577,28 @@ mod tests {
         assert_eq!(n(&got, &node("guests_running")), 2.0);
         assert_eq!(n(&got, &node("guests_total")), 3.0);
 
-        assert_eq!(n(&got, "guest/cddlabs-w1/status"), 1.0);
-        assert_eq!(t(&got, "guest/cddlabs-w1/type"), "qemu");
-        assert_eq!(n(&got, "guest/cddlabs-w1/vmid"), 611.0);
-        assert_eq!(t(&got, "guest/cddlabs-w1/node"), "cdd-prox-01");
-        assert_eq!(n(&got, "guest/cddlabs-w1/cpu"), 0.25);
-        assert_eq!(n(&got, "guest/cddlabs-w1/mem"), 0.5);
-        assert_eq!(n(&got, "guest/cddlabs-w1/mem_bytes"), 4.0 * GIB);
-        assert_eq!(n(&got, "guest/cddlabs-w1/uptime"), 3600.0);
+        assert_eq!(n(&got, "guest/web-1/status"), 1.0);
+        assert_eq!(t(&got, "guest/web-1/type"), "qemu");
+        assert_eq!(n(&got, "guest/web-1/vmid"), 611.0);
+        assert_eq!(t(&got, "guest/web-1/node"), "pve-1");
+        assert_eq!(n(&got, "guest/web-1/cpu"), 0.25);
+        assert_eq!(n(&got, "guest/web-1/mem"), 0.5);
+        assert_eq!(n(&got, "guest/web-1/mem_bytes"), 4.0 * GIB);
+        assert_eq!(n(&got, "guest/web-1/uptime"), 3600.0);
         assert_eq!(n(&got, "guest/vm9000/status"), 0.0);
         assert_eq!(n(&got, "guest/vm9000/mem"), 0.0);
         assert_eq!(t(&got, "guest/dns-01/type"), "lxc");
         assert_eq!(n(&got, "guest/dns-01/mem"), 0.25);
 
-        assert_eq!(n(&got, "storage/cdd-prox-01/local-zfs/used"), 0.25);
-        assert_eq!(n(&got, "storage/cdd-prox-01/local-zfs/avail_bytes"), 300.0 * GIB);
-        assert_eq!(n(&got, "storage/cdd-prox-01/local-zfs/total_bytes"), 400.0 * GIB);
-        assert_eq!(n(&got, "storage/cdd-prox-01/local-zfs/active"), 1.0);
-        assert_eq!(t(&got, "storage/cdd-prox-01/local-zfs/type"), "zfspool");
-        assert_eq!(n(&got, "storage/cdd-prox-01/nas-backup/active"), 0.0);
-        assert_eq!(t(&got, "storage/cdd-prox-01/nas-backup/type"), "nfs");
-        assert!(!got.contains_key("storage/cdd-prox-01/nas-backup/used"));
-        assert!(!got.contains_key("storage/cdd-prox-01/nas-backup/total_bytes"));
+        assert_eq!(n(&got, "storage/pve-1/local-zfs/used"), 0.25);
+        assert_eq!(n(&got, "storage/pve-1/local-zfs/avail_bytes"), 300.0 * GIB);
+        assert_eq!(n(&got, "storage/pve-1/local-zfs/total_bytes"), 400.0 * GIB);
+        assert_eq!(n(&got, "storage/pve-1/local-zfs/active"), 1.0);
+        assert_eq!(t(&got, "storage/pve-1/local-zfs/type"), "zfspool");
+        assert_eq!(n(&got, "storage/pve-1/nas-backup/active"), 0.0);
+        assert_eq!(t(&got, "storage/pve-1/nas-backup/type"), "nfs");
+        assert!(!got.contains_key("storage/pve-1/nas-backup/used"));
+        assert!(!got.contains_key("storage/pve-1/nas-backup/total_bytes"));
 
         assert_eq!(n(&got, "nodes_online"), 1.0);
         assert_eq!(n(&got, "nodes_total"), 1.0);

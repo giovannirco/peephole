@@ -315,7 +315,7 @@ mod tests {
         let [stars, forks, issues, prs, size] = counts;
         json!({
             "id": id,
-            "owner": {"id": 7, "login": "gio", "email": "gio@noreply.example.invalid"},
+            "owner": {"id": 7, "login": "owner", "email": "owner@noreply.example.invalid"},
             "name": name,
             "full_name": format!("gio/{name}"),
             "description": "",

@@ -298,8 +298,8 @@ mod tests {
                 "queryTypeChartData": {"labels": ["A", "AAAA"], "datasets": [{"data": [683, 42]}]},
                 "protocolTypeChartData": {"labels": ["Udp"], "datasets": [{"data": [925]}]},
                 "topClients": [
-                    {"name": "192.168.10.5", "domain": "server1.home", "hits": 463, "rateLimited": false},
-                    {"name": "192.168.10.13", "hits": 165, "rateLimited": false}
+                    {"name": "10.0.0.5", "domain": "server1.home", "hits": 463, "rateLimited": false},
+                    {"name": "10.0.0.13", "hits": 165, "rateLimited": false}
                 ],
                 "topDomains": [
                     {"name": "www.example.invalid", "hits": 114},
@@ -362,7 +362,7 @@ mod tests {
         assert_eq!(n("top_domain_hits"), 114.0);
         assert_eq!(t("top_blocked"), "ads.example.invalid");
         assert_eq!(n("top_blocked_hits"), 10.0);
-        assert_eq!(t("top_client"), "192.168.10.5");
+        assert_eq!(t("top_client"), "10.0.0.5");
         assert_eq!(n("top_client_hits"), 463.0);
         assert_eq!(t("top/domain/0"), "www.example.invalid");
         assert_eq!(n("top/domain/0/hits"), 114.0);

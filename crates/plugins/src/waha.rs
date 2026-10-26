@@ -301,8 +301,8 @@ mod tests {
 
     fn every_status() -> serde_json::Value {
         json!([
-            session("bitops", "WORKING"),
-            session("p8571", "SCAN_QR_CODE"),
+            session("line-a", "WORKING"),
+            session("sales", "SCAN_QR_CODE"),
             session("booting", "STARTING"),
             session("old", "STOPPED"),
             session("crashed", "FAILED"),
@@ -331,22 +331,22 @@ mod tests {
     #[tokio::test]
     async fn reports_each_server_and_its_sessions() {
         let a = waha(KEY_A, every_status()).await;
-        let got = poll(&plugin(&[("bitops", a.uri(), KEY_A)])).await;
-        assert_eq!(n(&got, "bitops/up"), 1.0);
-        assert_eq!(got["bitops/version"], Value::Text("2026.10.2".into()));
-        assert_eq!(got["bitops/engine"], Value::Text("GOWS".into()));
-        assert_eq!(got["bitops/tier"], Value::Text("PLUS".into()));
-        assert_eq!(n(&got, "bitops/uptime"), 3725.0);
-        assert_eq!(n(&got, "bitops/sessions_total"), 7.0);
-        assert_eq!(n(&got, "bitops/sessions_working"), 1.0);
-        assert_eq!(n(&got, "bitops/session/bitops/working"), 1.0);
-        assert_eq!(n(&got, "bitops/session/p8571/working"), 0.0);
-        assert_eq!(got["bitops/session/p8571/status"], Value::Text("SCAN_QR_CODE".into()));
-        assert_eq!(got["bitops/session/confirm/status"], Value::Text("PASSKEY_CONFIRMATION_REQUIRED".into()));
+        let got = poll(&plugin(&[("line-a", a.uri(), KEY_A)])).await;
+        assert_eq!(n(&got, "line-a/up"), 1.0);
+        assert_eq!(got["line-a/version"], Value::Text("2026.10.2".into()));
+        assert_eq!(got["line-a/engine"], Value::Text("GOWS".into()));
+        assert_eq!(got["line-a/tier"], Value::Text("PLUS".into()));
+        assert_eq!(n(&got, "line-a/uptime"), 3725.0);
+        assert_eq!(n(&got, "line-a/sessions_total"), 7.0);
+        assert_eq!(n(&got, "line-a/sessions_working"), 1.0);
+        assert_eq!(n(&got, "line-a/session/line-a/working"), 1.0);
+        assert_eq!(n(&got, "line-a/session/sales/working"), 0.0);
+        assert_eq!(got["line-a/session/sales/status"], Value::Text("SCAN_QR_CODE".into()));
+        assert_eq!(got["line-a/session/confirm/status"], Value::Text("PASSKEY_CONFIRMATION_REQUIRED".into()));
         assert_eq!(n(&got, "sessions_broken"), 5.0);
         assert_eq!(
             got["broken_list"],
-            Value::Text("bitops/confirm, bitops/crashed, bitops/old, bitops/p8571, bitops/passkey".into())
+            Value::Text("line-a/confirm, line-a/crashed, line-a/old, line-a/p8571, line-a/passkey".into())
         );
     }
 
