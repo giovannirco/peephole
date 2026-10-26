@@ -8,6 +8,7 @@ use peephole_render::{RenderCtx, render_page};
 
 const YAML: &str = include_str!("fixtures/sample.yaml");
 const JSON: &str = include_str!("fixtures/sample.json");
+const DEMO: &str = include_str!("../../../examples/demo.yaml");
 
 fn store_from_json(text: &str) -> Store {
     let store = Store::new();
@@ -86,6 +87,24 @@ fn every_sample_page_renders_a_non_blank_frame() {
             assert!(colours.len() > 20, "page {} at {w}x{h} has only {} colours", page.name, colours.len());
             assert!(f.to_png().unwrap().len() > 1000);
         }
+    }
+}
+
+#[test]
+fn demo_pages_render_at_three_x() {
+    let cfg = Config::parse(DEMO, |_| None).expect("demo config parses");
+    let store = Store::new();
+    for (i, page) in cfg.pages.iter().enumerate() {
+        let mut c = ctx(cfg.pages.len());
+        c.page_index = i;
+        let f = render_page(page, &store, &c, 960, 510);
+        assert_eq!((f.width, f.height, f.rgba.len()), (960, 510, 960 * 510 * 4), "page {}", page.name);
+        assert!(f.to_png().unwrap().len() > 1000);
+    }
+    let (sample, store) = setup();
+    for page in &sample.pages {
+        let f = render_page(page, &store, &ctx(sample.pages.len()), 960, 510);
+        assert_eq!(f.rgba.len(), 960 * 510 * 4, "page {}", page.name);
     }
 }
 
