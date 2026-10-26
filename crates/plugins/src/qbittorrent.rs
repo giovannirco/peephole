@@ -198,6 +198,7 @@ impl Server {
             .body(body)
             .send()
             .await
+            .map_err(crate::http::scrub)
             .context("POST /api/v2/auth/login")?;
         let status = response.status();
         anyhow::ensure!(status.is_success(), "POST /api/v2/auth/login: HTTP {status}");
@@ -230,7 +231,7 @@ impl Server {
     async fn send(&self, url: &reqwest::Url, sid: &str) -> anyhow::Result<reqwest::Response> {
         let mut cookie = HeaderValue::from_str(sid).context("invalid session cookie")?;
         cookie.set_sensitive(true);
-        let response = self.client.get(url.clone()).header(COOKIE, cookie).send().await;
+        let response = self.client.get(url.clone()).header(COOKIE, cookie).send().await.map_err(crate::http::scrub);
         response.with_context(|| format!("GET {}", url.path()))
     }
 

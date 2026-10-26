@@ -97,6 +97,7 @@ impl Plugin for UptimeKuma {
             .basic_auth(USERNAME, Some(&self.api_key))
             .send()
             .await
+            .map_err(crate::http::scrub)
             .with_context(|| format!("GET {path}"))?;
         let status = response.status();
         anyhow::ensure!(

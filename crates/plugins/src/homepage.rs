@@ -168,7 +168,8 @@ impl Homepage {
         let mut url = crate::http::join(&self.base, check.route());
         url.query_pairs_mut().append_pair("groupName", &entry.group).append_pair("serviceName", &entry.name);
         let path = url.path().to_owned();
-        let response = self.client.get(url).send().await.with_context(|| format!("GET {path}"))?;
+        let response =
+            self.client.get(url).send().await.map_err(crate::http::scrub).with_context(|| format!("GET {path}"))?;
         let status = response.status();
         if status == reqwest::StatusCode::BAD_REQUEST {
             return Ok(Probe { online: false, latency_ms: None, status: None });

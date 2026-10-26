@@ -86,7 +86,8 @@ impl Github {
 
     async fn fetch<T: for<'de> Deserialize<'de>>(&self, url: reqwest::Url) -> anyhow::Result<Page<T>> {
         let path = url.path().to_owned();
-        let response = self.client.get(url).send().await.with_context(|| format!("GET {path}"))?;
+        let response =
+            self.client.get(url).send().await.map_err(crate::http::scrub).with_context(|| format!("GET {path}"))?;
         let status = response.status();
         let rate = Rate::from_headers(response.headers());
         let limited = matches!(status.as_u16(), 403 | 429) && rate.is_some_and(|r| r.remaining == 0.0);

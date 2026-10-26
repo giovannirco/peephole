@@ -87,7 +87,8 @@ impl X {
 
     async fn fetch<T: for<'de> Deserialize<'de>>(&self, url: reqwest::Url) -> anyhow::Result<Envelope<T>> {
         let path = url.path().to_owned();
-        let response = self.client.get(url).send().await.with_context(|| format!("GET {path}"))?;
+        let response =
+            self.client.get(url).send().await.map_err(crate::http::scrub).with_context(|| format!("GET {path}"))?;
         let status = response.status();
         let text = response.text().await.with_context(|| format!("GET {path}"))?;
         anyhow::ensure!(status.is_success(), "GET {path}: HTTP {status}{}", describe(&text));

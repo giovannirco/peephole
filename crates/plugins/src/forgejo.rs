@@ -181,7 +181,8 @@ impl Forgejo {
         let mut url = self.url(&format!("repos/{}/actions/tasks", repo.full_name));
         url.query_pairs_mut().append_pair("status", "failure").append_pair("limit", &RUNS_PAGE.to_string());
         let path = url.path().to_owned();
-        let response = self.client.get(url).send().await.with_context(|| format!("GET {path}"))?;
+        let response =
+            self.client.get(url).send().await.map_err(crate::http::scrub).with_context(|| format!("GET {path}"))?;
         let status = response.status();
         if status == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);

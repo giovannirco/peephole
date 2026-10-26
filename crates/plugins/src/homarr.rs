@@ -104,7 +104,8 @@ impl Homarr {
     async fn json<T: for<'de> Deserialize<'de>>(&self, path: &str) -> anyhow::Result<T> {
         let url = crate::http::join(&self.base, path);
         let path = url.path().to_owned();
-        let response = self.client.get(url).send().await.with_context(|| format!("GET {path}"))?;
+        let response =
+            self.client.get(url).send().await.map_err(crate::http::scrub).with_context(|| format!("GET {path}"))?;
         let status = response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(Rejected(path).into());

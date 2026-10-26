@@ -155,8 +155,14 @@ impl UnifiNetwork {
     async fn log_in(&self) -> anyhow::Result<Option<String>> {
         let path = self.login.path().to_owned();
         let body = serde_json::json!({"username": self.username, "password": self.password});
-        let response =
-            self.client.post(self.login.clone()).json(&body).send().await.with_context(|| format!("POST {path}"))?;
+        let response = self
+            .client
+            .post(self.login.clone())
+            .json(&body)
+            .send()
+            .await
+            .map_err(crate::http::scrub)
+            .with_context(|| format!("POST {path}"))?;
         let status = response.status();
         anyhow::ensure!(status.is_success(), "POST {path}: HTTP {status}");
         let headers = response.headers();
@@ -171,7 +177,7 @@ impl UnifiNetwork {
             value.set_sensitive(true);
             request = request.header(CSRF, value);
         }
-        request.send().await.with_context(|| format!("GET {}", url.path()))
+        request.send().await.map_err(crate::http::scrub).with_context(|| format!("GET {}", url.path()))
     }
 
     /// `GET {api}/{endpoint}`, logging in again once on a 401, and unwrap the

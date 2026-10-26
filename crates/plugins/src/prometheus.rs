@@ -122,7 +122,7 @@ impl Prometheus {
     }
 
     async fn fetch(&self, url: reqwest::Url) -> anyhow::Result<Data> {
-        let response = self.client.get(url).send().await?;
+        let response = self.client.get(url).send().await.map_err(crate::http::scrub)?;
         let status = response.status();
         let text = response.text().await?;
         let body: ApiResponse = serde_json::from_str(&text)

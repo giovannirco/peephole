@@ -37,11 +37,15 @@ fn sensitive(value: &str) -> anyhow::Result<HeaderValue> {
     Ok(v)
 }
 
+/// A request error without its URL (query strings may carry credentials).
+pub(crate) fn scrub(error: reqwest::Error) -> anyhow::Error {
+    anyhow::Error::from(error.without_url())
+}
+
 /// GET `url` and fail on any non-2xx status.
 pub(crate) async fn get(client: &reqwest::Client, url: reqwest::Url) -> anyhow::Result<reqwest::Response> {
     let path = url.path().to_owned();
-    let response =
-        client.get(url).send().await.map_err(reqwest::Error::without_url).with_context(|| format!("GET {path}"))?;
+    let response = client.get(url).send().await.map_err(scrub).with_context(|| format!("GET {path}"))?;
     let status = response.status();
     anyhow::ensure!(status.is_success(), "GET {path}: HTTP {status}");
     Ok(response)
