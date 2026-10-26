@@ -1,13 +1,33 @@
 use std::time::Duration;
 
 use anyhow::Context;
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use peephole_core::{Plugin, Value};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
+mod api;
 mod quantity;
+mod values;
 
 /// Where a pod finds its own ServiceAccount credentials.
 const SA_DIR: &str = "/var/run/secrets/kubernetes.io/serviceaccount";
+
+const VERSION: &str = "/version";
+const NODES: &str = "/api/v1/nodes";
+const NODE_METRICS: &str = "/apis/metrics.k8s.io/v1beta1/nodes";
+const PODS: &str = "/api/v1/pods";
+const PVCS: &str = "/api/v1/persistentvolumeclaims";
+const EVENTS: &str = "/api/v1/events";
+const APPLICATIONS: &str = "/apis/argoproj.io/v1alpha1/applications";
+const KUSTOMIZATIONS: &str = "/apis/kustomize.toolkit.fluxcd.io/v1/kustomizations";
+const HELMRELEASES: &str = "/apis/helm.toolkit.fluxcd.io/v2/helmreleases";
+const CERTIFICATES: &str = "/apis/cert-manager.io/v1/certificates";
+
+const POD_PAGE: usize = 5000;
+const POD_PAGES: usize = 5;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -80,6 +100,12 @@ pub struct Kubernetes {
     name: String,
     interval: Duration,
     clusters: Vec<Cluster>,
+    argocd: bool,
+    flux: bool,
+    certificates: bool,
+    metrics: bool,
+    events: bool,
+    pods: bool,
 }
 
 impl Kubernetes {
@@ -105,7 +131,17 @@ impl Kubernetes {
             );
             clusters.push(cluster);
         }
-        Ok(Self { name: name.to_owned(), interval, clusters })
+        Ok(Self {
+            name: name.to_owned(),
+            interval,
+            clusters,
+            argocd: settings.argocd,
+            flux: settings.flux,
+            certificates: settings.certificates,
+            metrics: settings.metrics,
+            events: settings.events,
+            pods: settings.pods,
+        })
     }
 }
 
@@ -192,183 +228,149 @@ fn client(timeout: Duration, token: &str, trust: Trust) -> anyhow::Result<reqwes
     builder.build().context("building the HTTP client (is ca_pem a valid certificate?)")
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-    use std::path::PathBuf;
-
-    use super::*;
-
-    pub(super) const TEST_CA: &str = "-----BEGIN CERTIFICATE-----
-MIIBpjCCAU2gAwIBAgIUIFnQIOBL42pdzcveTv7q99yJ67kwCgYIKoZIzj0EAwIw
-KDEmMCQGA1UEAwwdcGVlcGhvbGUtdGVzdC5leGFtcGxlLmludmFsaWQwIBcNMjYx
-MDI2MDEyOTU1WhgPMjEyNjEwMDIwMTI5NTVaMCgxJjAkBgNVBAMMHXBlZXBob2xl
-LXRlc3QuZXhhbXBsZS5pbnZhbGlkMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE
-+hJzuX4DV+tdSOG+WrhGachAn8ft6V2iTsT5KcQdDnrlQUXho8d0xYpPl3f+WSym
-4pozZUxjNapVBoA8kHhG16NTMFEwHQYDVR0OBBYEFPjBoAJQt88I8jSlpLNl8CzQ
-BYfNMB8GA1UdIwQYMBaAFPjBoAJQt88I8jSlpLNl8CzQBYfNMA8GA1UdEwEB/wQF
-MAMBAf8wCgYIKoZIzj0EAwIDRwAwRAIgAapPelxYs37BuPi3puIkucf9gqa6NRj+
-tfezldeT0FQCIEMY5Pvrzt8Eyy1ZRVR+13i/XPEkmVLpfn0m7bClIkpW
------END CERTIFICATE-----
-";
-
-    const TOKEN: &str = "sa-token-not-real-7f3a";
-
-    fn settings(yaml: &str) -> Settings {
-        serde_yaml::from_str(yaml).unwrap()
+#[async_trait]
+impl Plugin for Kubernetes {
+    fn name(&self) -> &str {
+        &self.name
     }
-
-    fn build(yaml: &str) -> anyhow::Result<Kubernetes> {
-        Kubernetes::with_env("k8s", settings(yaml), &|_| None)
+    fn interval(&self) -> Duration {
+        self.interval
     }
-
-    fn error(yaml: &str) -> String {
-        format!("{:#}", build(yaml).err().expect("settings should be rejected"))
-    }
-
-    /// A fresh directory holding a ServiceAccount token and CA like a pod's mount.
-    fn sa_dir(test: &str, token: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("peephole-k8s-{}-{test}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("token"), token).unwrap();
-        std::fs::write(dir.join("ca.crt"), TEST_CA).unwrap();
-        dir
-    }
-
-    fn in_cluster_yaml(dir: &std::path::Path) -> String {
-        format!(
-            "clusters: [{{name: local, in_cluster: true, token_file: '{}', ca_file: '{}'}}]",
-            dir.join("token").display(),
-            dir.join("ca.crt").display()
-        )
-    }
-
-    #[test]
-    fn defaults() {
-        let s = settings("{}");
-        assert_eq!(s.interval_s, 30);
-        assert!(s.timeout_s.is_none());
-        assert!(s.argocd && s.flux && s.certificates && s.metrics && s.events && s.pods);
-        assert_eq!(s.clusters.len(), 1);
-        assert_eq!(s.clusters[0].name, "local");
-        assert!(s.clusters[0].in_cluster && s.clusters[0].url.is_none() && !s.clusters[0].insecure);
-    }
-
-    #[test]
-    fn in_cluster_reads_the_service_env_and_the_mounted_secret() {
-        let dir = sa_dir("env", &format!("{TOKEN}\n"));
-        let env = HashMap::from([("KUBERNETES_SERVICE_HOST", "10.43.0.1"), ("KUBERNETES_SERVICE_PORT", "443")]);
-        let lookup = |var: &str| env.get(var).map(|v| (*v).to_owned());
-        let k = Kubernetes::with_env("k8s", settings(&in_cluster_yaml(&dir)), &lookup).unwrap();
-        assert_eq!(k.interval, Duration::from_secs(30));
-        assert_eq!(k.clusters.len(), 1);
-        assert_eq!(k.clusters[0].key, "local");
-        assert_eq!(k.clusters[0].base.as_str(), "https://10.43.0.1/");
-    }
-
-    #[test]
-    fn in_cluster_brackets_an_ipv6_service_host() {
-        let dir = sa_dir("ipv6", TOKEN);
-        let env = HashMap::from([("KUBERNETES_SERVICE_HOST", "fd00:10:96::1"), ("KUBERNETES_SERVICE_PORT", "6443")]);
-        let lookup = |var: &str| env.get(var).map(|v| (*v).to_owned());
-        let k = Kubernetes::with_env("k8s", settings(&in_cluster_yaml(&dir)), &lookup).unwrap();
-        assert_eq!(k.clusters[0].base.as_str(), "https://[fd00:10:96::1]:6443/");
-    }
-
-    #[test]
-    fn in_cluster_url_overrides_the_env() {
-        let dir = sa_dir("url", TOKEN);
-        let yaml = in_cluster_yaml(&dir).replace("in_cluster: true", "in_cluster: true, url: 'http://127.0.0.1:1'");
-        assert_eq!(build(&yaml).unwrap().clusters[0].base.as_str(), "http://127.0.0.1:1/");
-    }
-
-    #[test]
-    fn in_cluster_without_the_env_names_the_cluster_and_the_variable() {
-        let dir = sa_dir("noenv", TOKEN);
-        let err = error(&in_cluster_yaml(&dir));
-        assert!(err.contains("\"local\"") && err.contains("KUBERNETES_SERVICE_HOST"), "{err}");
-    }
-
-    #[test]
-    fn a_missing_token_file_fails_fast_naming_the_cluster() {
-        let err = error(
-            "clusters: [{name: home, in_cluster: true, url: 'https://k.example.invalid', token_file: /nonexistent/peephole/token, insecure: true}]",
-        );
-        assert!(err.contains("\"home\"") && err.contains("token_file"), "{err}");
-    }
-
-    #[test]
-    fn remote_clusters_need_a_url_a_token_and_a_ca_or_insecure() {
-        let ok = format!(
-            "clusters: [{{name: a, url: 'https://a.example.invalid:6443', token: t, ca_pem: {:?}}}, {{name: b, url: 'https://b.example.invalid:6443', token: t, insecure: true}}]",
-            TEST_CA
-        );
-        let k = build(&ok).unwrap();
-        assert_eq!(k.clusters.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["a", "b"]);
-        for (yaml, needle) in [
-            ("clusters: [{name: nourl, token: t, insecure: true}]", "url"),
-            ("clusters: [{name: notoken, url: 'https://x.example.invalid', insecure: true}]", "token"),
-            ("clusters: [{name: noca, url: 'https://x.example.invalid', token: t}]", "ca_pem"),
-            (
-                "clusters: [{name: both, url: 'https://x.example.invalid', token: t, ca_pem: x, insecure: true}]",
-                "insecure",
-            ),
-            (
-                "clusters: [{name: twotokens, url: 'https://x.example.invalid', token: t, token_file: /f, insecure: true}]",
-                "token_file",
-            ),
-            ("clusters: [{name: badurl, url: 'ftp://x.example.invalid', token: t, insecure: true}]", "url"),
-            (
-                "clusters: [{name: incl, in_cluster: true, token: t, url: 'https://x.example.invalid', insecure: true}]",
-                "in_cluster",
-            ),
-        ] {
-            let err = error(yaml);
-            let cluster = yaml.split("name: ").nth(1).unwrap().split(',').next().unwrap();
-            assert!(err.contains(&format!("{cluster:?}")) && err.contains(needle), "{yaml}: {err}");
-        }
-    }
-
-    #[test]
-    fn a_ca_that_is_not_pem_is_rejected_naming_the_cluster() {
-        let err =
-            error("clusters: [{name: lab, url: 'https://x.example.invalid', token: t, ca_pem: 'not a certificate'}]");
-        assert!(err.contains("\"lab\"") && err.contains("ca_pem"), "{err}");
-        let broken = TEST_CA.replace("MIIBpjCC", "MIIBpjXX");
-        let err = format!(
-            "{:#}",
-            build(&format!(
-                "clusters: [{{name: lab, url: 'https://x.example.invalid', token: t, ca_pem: {broken:?}}}]"
-            ))
-            .err()
-            .unwrap()
-        );
-        assert!(err.contains("\"lab\""), "{err}");
-    }
-
-    #[test]
-    fn cluster_names_must_be_present_and_distinct() {
-        assert!(error("clusters: []").contains("clusters"));
-        let remote =
-            |name: &str| format!("{{name: '{name}', url: 'https://x.example.invalid', token: t, insecure: true}}");
-        assert!(error(&format!("clusters: [{}]", remote(""))).contains("name"));
-        let err = error(&format!("clusters: [{}, {}]", remote("a b"), remote("a-b")));
-        assert!(err.contains("a-b") && err.contains("duplicate"), "{err}");
-    }
-
-    #[test]
-    fn a_token_that_is_not_a_header_value_is_rejected_without_echoing_it() {
-        let err = error(&format!(
-            "clusters: [{{name: x, url: 'https://x.example.invalid', token: \"{TOKEN}\\u0001bad\", insecure: true}}]"
-        ));
-        assert!(err.contains("\"x\"") && err.contains("token") && !err.contains(TOKEN), "{err}");
-    }
-
-    #[test]
-    fn interval_and_timeout_must_be_positive() {
-        let remote = "clusters: [{name: x, url: 'https://x.example.invalid', token: t, insecure: true}]";
-        assert!(error(&format!("{{interval_s: 0, {remote}}}")).contains("interval_s"));
-        assert!(error(&format!("{{timeout_s: 0, {remote}}}")).contains("timeout_s"));
-        assert_eq!(build(&format!("{{interval_s: 5, {remote}}}")).unwrap().interval, Duration::from_secs(5));
+    async fn poll(&self) -> anyhow::Result<Vec<(String, Value)>> {
+        self.poll_at(Utc::now()).await
     }
 }
+
+impl Kubernetes {
+    async fn poll_at(&self, now: DateTime<Utc>) -> anyhow::Result<Vec<(String, Value)>> {
+        let polls = futures::future::join_all(self.clusters.iter().map(|c| self.poll_cluster(c, now))).await;
+        let mut partial = crate::partial::Partial::new(&self.name, "requests");
+        let mut answered = 0;
+        for (cluster, poll) in self.clusters.iter().zip(polls) {
+            answered += usize::from(poll.nodes_ok);
+            for (path, result) in poll.parts {
+                match result {
+                    Ok(values) => partial.ok(values.into_iter().map(|(k, v)| (format!("{}/{k}", cluster.key), v))),
+                    Err(e) => partial.fail(&format!("{} {path}", cluster.key), &e),
+                }
+            }
+        }
+        let mut values = partial.finish()?;
+        values.push(("clusters_total".into(), Value::Number(self.clusters.len() as f64)));
+        values.push(("clusters_ok".into(), Value::Number(answered as f64)));
+        Ok(values)
+    }
+
+    async fn poll_cluster(&self, c: &Cluster, now: DateTime<Utc>) -> ClusterPoll {
+        let (version, nodes, metrics, pods, pvcs, events, apps, kustomizations, helmreleases, certs) = tokio::join!(
+            c.get::<api::Version>(VERSION, &[]),
+            c.list::<api::Node>(NODES),
+            when(self.metrics, c.list::<api::NodeMetrics>(NODE_METRICS)),
+            when(self.pods, c.pods()),
+            c.list::<api::Pvc>(PVCS),
+            when(
+                self.events,
+                c.list_query::<api::Event>(EVENTS, &[("fieldSelector", "type=Warning"), ("limit", "500")])
+            ),
+            when(self.argocd, c.list::<api::Application>(APPLICATIONS)),
+            when(self.flux, c.list::<api::Reconciled>(KUSTOMIZATIONS)),
+            when(self.flux, c.list::<api::Reconciled>(HELMRELEASES)),
+            when(self.certificates, c.list::<api::Certificate>(CERTIFICATES)),
+        );
+        let mut parts: Vec<(&'static str, anyhow::Result<values::Values>)> = Vec::new();
+        parts.push((VERSION, version.map(values::version)));
+        if let Some(metrics) = metrics {
+            let listed = nodes.as_ref().ok().map(Vec::as_slice);
+            parts.push((NODE_METRICS, metrics.and_then(|m| values::metrics(&m, listed))));
+        }
+        let nodes_ok = nodes.is_ok();
+        parts.push((NODES, nodes.and_then(|n| values::nodes(&n))));
+        if let Some(pods) = pods {
+            parts.push((PODS, pods.map(|p| values::pods(&p))));
+        }
+        parts.push((PVCS, pvcs.map(|p| values::pvcs(&p))));
+        if let Some(events) = events {
+            parts.push((EVENTS, events.map(|e| values::events(&e, now))));
+        }
+        if let Some(apps) = apps {
+            parts.push((APPLICATIONS, apps.map(|a| values::argo(&a))));
+        }
+        let flux: Vec<_> =
+            [("kustomization", KUSTOMIZATIONS, kustomizations), ("helmrelease", HELMRELEASES, helmreleases)]
+                .into_iter()
+                .filter_map(|(kind, path, result)| result.map(|r| (kind, path, r)))
+                .collect();
+        let answered: Vec<(&str, &[api::Reconciled])> =
+            flux.iter().filter_map(|(kind, _, r)| r.as_ref().ok().map(|o| (*kind, o.as_slice()))).collect();
+        let mut totals = (!answered.is_empty()).then(|| values::flux_totals(&answered));
+        for (kind, path, result) in flux {
+            parts.push((
+                path,
+                result.map(|objects| {
+                    let mut out = values::flux_objects(kind, &objects);
+                    out.extend(totals.take().unwrap_or_default());
+                    out
+                }),
+            ));
+        }
+        if let Some(certs) = certs {
+            parts.push((CERTIFICATES, certs.map(|c| values::certificates(&c, now))));
+        }
+        ClusterPoll { parts, nodes_ok }
+    }
+}
+
+struct ClusterPoll {
+    parts: Vec<(&'static str, anyhow::Result<values::Values>)>,
+    nodes_ok: bool,
+}
+
+async fn when<T>(enabled: bool, fetch: impl Future<Output = T>) -> Option<T> {
+    if enabled { Some(fetch.await) } else { None }
+}
+
+impl Cluster {
+    fn url(&self, path: &str, query: &[(&str, &str)]) -> reqwest::Url {
+        let mut url = crate::http::join(&self.base, path);
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
+        }
+        url
+    }
+
+    async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, &str)]) -> anyhow::Result<T> {
+        let response = crate::http::get(&self.client, self.url(path, query)).await?;
+        response.json().await.map_err(|e| anyhow::anyhow!("GET {path}: unexpected body: {}", e.without_url()))
+    }
+
+    async fn list<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<Vec<T>> {
+        self.list_query(path, &[]).await
+    }
+
+    async fn list_query<T: DeserializeOwned>(&self, path: &str, query: &[(&str, &str)]) -> anyhow::Result<Vec<T>> {
+        Ok(self.get::<api::List<T>>(path, query).await?.items)
+    }
+
+    /// Every pod, `POD_PAGE` at a time; more than `POD_PAGES` pages is an error.
+    async fn pods(&self) -> anyhow::Result<Vec<api::Pod>> {
+        let limit = POD_PAGE.to_string();
+        let mut pods = Vec::new();
+        let mut next: Option<String> = None;
+        for _ in 0..POD_PAGES {
+            let mut query = vec![("limit", limit.as_str())];
+            if let Some(token) = &next {
+                query.push(("continue", token.as_str()));
+            }
+            let page: api::List<api::Pod> = self.get(PODS, &query).await?;
+            pods.extend(page.items);
+            next = page.metadata.next.filter(|t| !t.is_empty());
+            if next.is_none() {
+                return Ok(pods);
+            }
+        }
+        anyhow::bail!("GET {PODS}: more than {POD_PAGES} pages of {POD_PAGE} pods")
+    }
+}
+
+#[cfg(test)]
+mod tests;
