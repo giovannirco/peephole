@@ -28,6 +28,17 @@ pub struct Field {
     pub pointer: String,
     #[serde(default)]
     pub kind: FieldKind,
+    /// A second pointer: the field becomes `pointer / over` (0 when `over` reads 0). Numbers only.
+    pub over: Option<String>,
+}
+
+impl Field {
+    fn validate(&self) -> anyhow::Result<()> {
+        if self.over.is_some() && self.kind != FieldKind::Number {
+            anyhow::bail!("field {}: over needs kind number", self.key);
+        }
+        Ok(())
+    }
 }
 
 /// `number` needs a JSON number (or a boolean, read as 1/0) and `text` a JSON string; anything else fails the field.
@@ -50,6 +61,7 @@ pub struct HttpJson {
 impl HttpJson {
     pub fn new(name: &str, settings: Settings) -> anyhow::Result<Self> {
         let interval = crate::period::seconds(settings.interval_s, "interval_s")?;
+        settings.fields.iter().try_for_each(Field::validate)?;
         let client = crate::http::client(crate::http::DEFAULT_TIMEOUT.min(interval), &settings.headers, None, false)?;
         Ok(Self {
             name: name.to_owned(),
@@ -78,9 +90,16 @@ fn number_at(body: &serde_json::Value, pointer: &str) -> anyhow::Result<f64> {
     number(found).ok_or_else(|| anyhow::anyhow!("pointer {pointer} holds {found}, not a Number"))
 }
 
+fn ratio(a: f64, b: f64) -> f64 {
+    if b == 0.0 { 0.0 } else { a / b }
+}
+
 fn extract(body: &serde_json::Value, field: &Field) -> anyhow::Result<Value> {
     match field.kind {
-        FieldKind::Number => number_at(body, &field.pointer).map(Value::Number),
+        FieldKind::Number => match &field.over {
+            Some(over) => Ok(Value::Number(ratio(number_at(body, &field.pointer)?, number_at(body, over)?))),
+            None => number_at(body, &field.pointer).map(Value::Number),
+        },
         FieldKind::Text => match at(body, &field.pointer)? {
             serde_json::Value::String(s) => Ok(Value::Text(s.clone())),
             other => anyhow::bail!("pointer {} holds {other}, not a Text", field.pointer),
@@ -194,6 +213,27 @@ fields:
         assert_eq!(got["down"], Value::Number(0.0));
         assert!(!got.contains_key("q"));
         assert_eq!(got["_fields_failed"], Value::Number(1.0));
+    }
+
+    #[tokio::test]
+    async fn over_divides_two_pointers_and_a_zero_divisor_reads_zero() {
+        let body = serde_json::json!({"memoryUsed": 3, "memoryTotal": 4, "zero": 0});
+        let fields = "fields: [{key: mem, pointer: /memoryUsed, over: /memoryTotal}, {key: z, pointer: /memoryUsed, over: /zero}, {key: gone, pointer: /memoryUsed, over: /nope}]";
+        let got = poll(body, fields).await;
+        assert_eq!(got["mem"], Value::Number(0.75));
+        assert_eq!(got["z"], Value::Number(0.0));
+        assert!(!got.contains_key("gone"));
+        assert_eq!(got["_fields_failed"], Value::Number(1.0));
+    }
+
+    fn build(yaml: &str) -> anyhow::Result<HttpJson> {
+        HttpJson::new("j", serde_yaml::from_str(&format!("url: 'http://example.invalid'\n{yaml}")).unwrap())
+    }
+
+    #[test]
+    fn over_on_a_text_field_is_refused_naming_the_field() {
+        let err = build("fields: [{key: room, pointer: /a, kind: text, over: /b}]").err().unwrap().to_string();
+        assert!(err.contains("room") && err.contains("over"), "{err}");
     }
 
     #[test]
