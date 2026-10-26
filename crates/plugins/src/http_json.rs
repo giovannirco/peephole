@@ -30,7 +30,7 @@ pub struct Field {
     pub kind: FieldKind,
 }
 
-/// `number` needs a JSON number and `text` a JSON string; anything else fails the field.
+/// `number` needs a JSON number (or a boolean, read as 1/0) and `text` a JSON string; anything else fails the field.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum FieldKind {
@@ -61,14 +61,30 @@ impl HttpJson {
     }
 }
 
+fn number(found: &serde_json::Value) -> Option<f64> {
+    match found {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        _ => None,
+    }
+}
+
+fn at<'a>(body: &'a serde_json::Value, pointer: &str) -> anyhow::Result<&'a serde_json::Value> {
+    body.pointer(pointer).ok_or_else(|| anyhow::anyhow!("pointer {pointer} not found"))
+}
+
+fn number_at(body: &serde_json::Value, pointer: &str) -> anyhow::Result<f64> {
+    let found = at(body, pointer)?;
+    number(found).ok_or_else(|| anyhow::anyhow!("pointer {pointer} holds {found}, not a Number"))
+}
+
 fn extract(body: &serde_json::Value, field: &Field) -> anyhow::Result<Value> {
-    let found = body.pointer(&field.pointer).ok_or_else(|| anyhow::anyhow!("pointer {} not found", field.pointer))?;
-    match (field.kind, found) {
-        (FieldKind::Number, serde_json::Value::Number(n)) => {
-            n.as_f64().map(Value::Number).ok_or_else(|| anyhow::anyhow!("{} is not an f64", field.pointer))
-        }
-        (FieldKind::Text, serde_json::Value::String(s)) => Ok(Value::Text(s.clone())),
-        (kind, other) => anyhow::bail!("pointer {} holds {other}, not a {kind:?}", field.pointer),
+    match field.kind {
+        FieldKind::Number => number_at(body, &field.pointer).map(Value::Number),
+        FieldKind::Text => match at(body, &field.pointer)? {
+            serde_json::Value::String(s) => Ok(Value::Text(s.clone())),
+            other => anyhow::bail!("pointer {} holds {other}, not a Text", field.pointer),
+        },
     }
 }
 
@@ -151,6 +167,33 @@ fields:
         let server = server(503).await;
         let err = plugin(&server, FIELDS).poll().await.unwrap_err().to_string();
         assert!(err.contains("503"), "{err}");
+    }
+
+    async fn serve(body: serde_json::Value) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    async fn poll(body: serde_json::Value, settings: &str) -> BTreeMap<String, Value> {
+        let server = serve(body).await;
+        plugin(&server, settings).poll().await.unwrap().into_iter().collect()
+    }
+
+    #[tokio::test]
+    async fn booleans_read_as_one_and_zero_but_strings_still_fail_a_number() {
+        let body = serde_json::json!({"internetUp": true, "wanDown": false, "quoted": "1"});
+        let fields =
+            "fields: [{key: up, pointer: /internetUp}, {key: down, pointer: /wanDown}, {key: q, pointer: /quoted}]";
+        let got = poll(body, fields).await;
+        assert_eq!(got["up"], Value::Number(1.0));
+        assert_eq!(got["down"], Value::Number(0.0));
+        assert!(!got.contains_key("q"));
+        assert_eq!(got["_fields_failed"], Value::Number(1.0));
     }
 
     #[test]
