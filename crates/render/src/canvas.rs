@@ -41,13 +41,19 @@ impl Canvas {
         (self.pixmap.height() as f32 / self.scale).round() as i32
     }
 
+    fn transform(&self) -> Transform {
+        Transform::from_scale(self.scale, self.scale)
+    }
+
     fn fill_path(&mut self, path: &Path, c: ColorU8, alpha: f32) {
-        self.pixmap.fill_path(path, &paint(c, alpha), FillRule::Winding, Transform::identity(), None);
+        let t = self.transform();
+        self.pixmap.fill_path(path, &paint(c, alpha), FillRule::Winding, t, None);
     }
 
     fn stroke_path(&mut self, path: &Path, c: ColorU8, width: f32, cap: LineCap) {
         let stroke = Stroke { width, line_cap: cap, ..Stroke::default() };
-        self.pixmap.stroke_path(path, &paint(c, 1.0), &stroke, Transform::identity(), None);
+        let t = self.transform();
+        self.pixmap.stroke_path(path, &paint(c, 1.0), &stroke, t, None);
     }
 
     /// Pixel-exact filled rectangle (no anti-aliasing); its edges round to whole scaled pixels.
@@ -281,5 +287,33 @@ mod tests {
         assert_eq!(at(&c, 19, 19), rgb(BG));
         assert_eq!(at(&c, 59, 59), rgb(OK));
         assert_eq!(at(&c, 60, 60), rgb(BG));
+    }
+
+    #[test]
+    fn paths_scale_with_the_canvas() {
+        let mut c = Canvas::new_scaled(80, 80, 2.0);
+        c.rrect(5.0, 5.0, 30.0, 30.0, 6.0, OK);
+        assert_eq!(at(&c, 40, 40), rgb(OK));
+        assert_eq!(at(&c, 40, 11), rgb(OK));
+        assert_eq!(at(&c, 11, 11), rgb(BG));
+        assert_eq!(at(&c, 40, 70), rgb(BG));
+        let mut d = Canvas::new_scaled(40, 40, 2.0);
+        d.dot(10.0, 10.0, 3.0, OK);
+        assert_eq!(at(&d, 24, 20), rgb(OK));
+        assert_eq!(at(&d, 27, 20), rgb(BG));
+    }
+
+    #[test]
+    fn stroke_width_scales_once() {
+        let mut c = Canvas::new_scaled(120, 120, 2.0);
+        c.arc((30.0, 30.0), 20.0, 4.0, (0.0, 1.0), OK);
+        assert_eq!(at(&c, 60, 19), rgb(BG));
+        assert_eq!(at(&c, 60, 24), rgb(OK));
+        assert_eq!(at(&c, 60, 30), rgb(BG));
+        assert_eq!(at(&c, 24, 59), rgb(OK));
+        let mut l = Canvas::new_scaled(40, 40, 2.0);
+        l.polyline(&[(2.0, 10.0), (18.0, 10.0)], 2.0, OK);
+        assert_eq!(at(&l, 20, 19), rgb(OK));
+        assert_eq!(at(&l, 20, 22), rgb(BG));
     }
 }
