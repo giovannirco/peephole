@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(n(&got, "sessions_broken"), 5.0);
         assert_eq!(
             got["broken_list"],
-            Value::Text("line-a/confirm, line-a/crashed, line-a/old, line-a/p8571, line-a/passkey".into())
+            Value::Text("line-a/confirm, line-a/crashed, line-a/old, line-a/passkey, line-a/sales".into())
         );
     }
 
