@@ -13,7 +13,10 @@ pub struct Settings {
     pub interval_s: u64,
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
+    #[serde(default)]
     pub fields: Vec<Field>,
+    #[serde(default)]
+    pub items: Vec<Items>,
 }
 
 fn default_interval() -> u64 {
@@ -34,6 +37,19 @@ pub struct Field {
     pub element: Option<String>,
     /// For `series`: keep only the last N points.
     pub last: Option<usize>,
+}
+
+/// One labelled set of keys per element of the array at `pointer`: `<prefix>/<label>/<field key>`,
+/// plus `<prefix>_count` (elements seen).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Items {
+    pub pointer: String,
+    /// Pointer into each element to a string label.
+    pub key: String,
+    pub prefix: String,
+    #[serde(default)]
+    pub fields: Vec<Field>,
 }
 
 impl Field {
@@ -65,12 +81,13 @@ pub struct HttpJson {
     url: reqwest::Url,
     client: reqwest::Client,
     fields: Vec<Field>,
+    items: Vec<Items>,
 }
 
 impl HttpJson {
     pub fn new(name: &str, settings: Settings) -> anyhow::Result<Self> {
         let interval = crate::period::seconds(settings.interval_s, "interval_s")?;
-        settings.fields.iter().try_for_each(Field::validate)?;
+        settings.fields.iter().chain(settings.items.iter().flat_map(|i| &i.fields)).try_for_each(Field::validate)?;
         let client = crate::http::client(crate::http::DEFAULT_TIMEOUT.min(interval), &settings.headers, None, false)?;
         Ok(Self {
             name: name.to_owned(),
@@ -78,6 +95,7 @@ impl HttpJson {
             url: crate::http::base_url(&settings.url)?,
             client,
             fields: settings.fields,
+            items: settings.items,
         })
     }
 }
@@ -130,6 +148,46 @@ fn extract(body: &serde_json::Value, field: &Field) -> anyhow::Result<Value> {
     }
 }
 
+fn read(partial: &mut crate::partial::Partial, body: &serde_json::Value, field: &Field, key: String) {
+    match extract(body, field) {
+        Ok(value) => partial.ok([(key, value)]),
+        Err(e) => partial.fail(&key, &e),
+    }
+}
+
+fn array_at<'a>(body: &'a serde_json::Value, pointer: &str) -> anyhow::Result<&'a Vec<serde_json::Value>> {
+    let found = at(body, pointer)?;
+    found.as_array().ok_or_else(|| anyhow::anyhow!("pointer {pointer} holds {found}, not an array"))
+}
+
+fn label_at(element: &serde_json::Value, pointer: &str) -> anyhow::Result<String> {
+    match at(element, pointer)? {
+        serde_json::Value::String(label) => Ok(crate::key::sanitize(label)),
+        other => anyhow::bail!("label {pointer} holds {other}, not a string"),
+    }
+}
+
+fn read_items(partial: &mut crate::partial::Partial, body: &serde_json::Value, items: &Items) {
+    let prefix = crate::key::sanitize(&items.prefix);
+    let elements = match array_at(body, &items.pointer) {
+        Ok(elements) => elements,
+        Err(e) => return partial.fail(&prefix, &e),
+    };
+    for (index, element) in elements.iter().enumerate() {
+        let label = match label_at(element, &items.key) {
+            Ok(label) => label,
+            Err(e) => {
+                partial.fail(&format!("{prefix}[{index}]"), &e);
+                continue;
+            }
+        };
+        for field in &items.fields {
+            read(partial, element, field, format!("{prefix}/{label}/{}", crate::key::sanitize(&field.key)));
+        }
+    }
+    partial.ok([(format!("{prefix}_count"), Value::Number(elements.len() as f64))]);
+}
+
 #[async_trait]
 impl Plugin for HttpJson {
     fn name(&self) -> &str {
@@ -142,10 +200,10 @@ impl Plugin for HttpJson {
         let body: serde_json::Value = crate::http::get(&self.client, self.url.clone()).await?.json().await?;
         let mut partial = crate::partial::Partial::new(&self.name, "fields");
         for field in &self.fields {
-            match extract(&body, field) {
-                Ok(value) => partial.ok([(field.key.clone(), value)]),
-                Err(e) => partial.fail(&field.key, &e),
-            }
+            read(&mut partial, &body, field, field.key.clone());
+        }
+        for items in &self.items {
+            read_items(&mut partial, &body, items);
         }
         partial.finish()
     }
@@ -288,6 +346,55 @@ fields:
         assert!(err.contains("cpu") && err.contains("series"), "{err}");
         let err = build("fields: [{key: cpu, pointer: /a, last: 3}]").err().unwrap().to_string();
         assert!(err.contains("cpu") && err.contains("series"), "{err}");
+    }
+
+    fn hosts() -> serde_json::Value {
+        serde_json::json!({"hosts": [
+            {"name": "Compute A", "up": true, "cpu": 0.0987, "memoryUsed": 3, "memoryTotal": 4,
+             "history": [[1792984863, 0.1], [1792984923, 0.2]]},
+            {"name": "Compute B", "up": false, "cpu": 0.5},
+            {"name": 7, "up": true, "cpu": 1}
+        ]})
+    }
+
+    const HOSTS: &str = r#"
+items:
+  - pointer: /hosts
+    key: /name
+    prefix: host
+    fields:
+      - {key: cpu, pointer: /cpu}
+      - {key: mem, pointer: /memoryUsed, over: /memoryTotal}
+      - {key: up, pointer: /up}
+      - {key: hist, pointer: /history, kind: series, element: /1}
+"#;
+
+    #[tokio::test]
+    async fn items_label_each_element_and_a_missing_field_fails_only_itself() {
+        let got = poll(hosts(), HOSTS).await;
+        assert_eq!(got["host/Compute-A/cpu"], Value::Number(0.0987));
+        assert_eq!(got["host/Compute-A/mem"], Value::Number(0.75));
+        assert_eq!(got["host/Compute-A/up"], Value::Number(1.0));
+        assert_eq!(got["host/Compute-A/hist"], Value::Series(vec![0.1, 0.2]));
+        assert_eq!(got["host/Compute-B/cpu"], Value::Number(0.5));
+        assert_eq!(got["host/Compute-B/up"], Value::Number(0.0));
+        assert!(!got.contains_key("host/Compute-B/mem") && !got.contains_key("host/Compute-B/hist"));
+        assert!(!got.keys().any(|k| k.contains('7')), "{:?}", got.keys());
+        assert_eq!(got["host_count"], Value::Number(3.0));
+        assert_eq!(got["_fields_failed"], Value::Number(3.0));
+    }
+
+    #[tokio::test]
+    async fn items_over_a_non_array_fail_as_one_part_and_keep_the_top_level_fields() {
+        let settings =
+            format!("fields: [{{key: first, pointer: /hosts/0/cpu}}]\n{}", HOSTS.replace("/hosts", "/hosts/0"));
+        let got = poll(hosts(), &settings).await;
+        assert_eq!(got["first"], Value::Number(0.0987));
+        assert!(!got.keys().any(|k| k.starts_with("host")), "{:?}", got.keys());
+        assert_eq!(got["_fields_failed"], Value::Number(1.0));
+        let server = serve(hosts()).await;
+        let err = plugin(&server, &HOSTS.replace("/hosts", "/nope")).poll().await.unwrap_err().to_string();
+        assert!(err.contains("host") && err.contains("/nope"), "{err}");
     }
 
     fn build(yaml: &str) -> anyhow::Result<HttpJson> {
