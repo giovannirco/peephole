@@ -10,11 +10,11 @@ use peephole_core::config::PluginEntry;
 pub mod cliproxyapi;
 pub mod clock;
 pub mod demo;
+pub mod forgejo;
+pub mod github;
 pub mod homarr;
 pub mod home_assistant;
 pub mod homepage;
-pub mod forgejo;
-pub mod github;
 mod http;
 pub mod http_json;
 mod insecure_tls;
@@ -30,12 +30,31 @@ pub mod unifi_network;
 pub mod unifi_protect;
 pub mod uptime_kuma;
 pub mod waha;
+pub mod x;
 
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "proxmox", "technitium", "homepage", "homarr", "uptime_kuma", "unifi_network", "cliproxyapi", "home_assistant", "waha", ]
-pub mod x;
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "forgejo", "github", "x", "kubernetes"]
+    &[
+        "clock",
+        "demo",
+        "prometheus",
+        "http_json",
+        "mempool",
+        "unifi_protect",
+        "proxmox",
+        "technitium",
+        "homepage",
+        "homarr",
+        "uptime_kuma",
+        "unifi_network",
+        "cliproxyapi",
+        "home_assistant",
+        "waha",
+        "forgejo",
+        "github",
+        "x",
+        "kubernetes",
+    ]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
