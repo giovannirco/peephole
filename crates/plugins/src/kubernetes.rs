@@ -8,6 +8,9 @@
 //! - `/api/v1/nodes`
 //! - `/apis/metrics.k8s.io/v1beta1/nodes` (`metrics`)
 //! - `/api/v1/pods?limit=5000`, following `metadata.continue` for up to 5 pages (`pods`)
+//!
+//! Clusters are polled one after another (each cluster's endpoints together) so the peak memory of a poll is one
+//! cluster's responses, not every cluster's at once.
 //! - `/api/v1/persistentvolumeclaims`
 //! - `/api/v1/events?fieldSelector=type%3DWarning&limit=500` (`events`)
 //! - `/apis/argoproj.io/v1alpha1/applications` (`argocd`)
@@ -276,7 +279,10 @@ impl Plugin for Kubernetes {
 
 impl Kubernetes {
     async fn poll_at(&self, now: DateTime<Utc>) -> anyhow::Result<Vec<(String, Value)>> {
-        let polls = futures::future::join_all(self.clusters.iter().map(|c| self.poll_cluster(c, now))).await;
+        let mut polls = Vec::with_capacity(self.clusters.len());
+        for c in &self.clusters {
+            polls.push(self.poll_cluster(c, now).await);
+        }
         let mut partial = crate::partial::Partial::new(&self.name, "requests");
         let mut answered = 0;
         for (cluster, poll) in self.clusters.iter().zip(polls) {

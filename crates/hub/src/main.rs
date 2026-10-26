@@ -9,6 +9,9 @@ use peephole_hub::state::{self, Hub};
 use tokio::sync::broadcast;
 use tracing_subscriber::EnvFilter;
 
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 const EVENT_BACKLOG: usize = 64;
 
 #[tokio::main]
