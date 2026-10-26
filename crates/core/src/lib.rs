@@ -12,7 +12,7 @@ pub mod scheduler;
 pub mod value;
 
 pub use config::Config;
-pub use device::{Device, Registry};
+pub use device::{Device, PageError, Registry};
 pub use page::{Card, Color, Fmt, Page, Thresholds, Widget};
 pub use plugin::{Event, Plugin};
 pub use value::{Stamped, Store, Value};

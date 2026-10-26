@@ -51,8 +51,8 @@ const INDEX: &str = r#"<!doctype html>
   <div class="grid">%%PAGES%%</div>
   <h2>Devices</h2>
   <table>
-    <thead><tr><th>ID</th><th>Name</th><th>Size</th><th>Page</th><th>Last seen</th><th>Frames</th><th></th></tr></thead>
-    <tbody id="devices"><tr><td colspan="7" class="empty">Loading devices…</td></tr></tbody>
+    <thead><tr><th>ID</th><th>Name</th><th>Size</th><th>Page</th><th>Pages</th><th>Last seen</th><th>Frames</th><th></th></tr></thead>
+    <tbody id="devices"><tr><td colspan="8" class="empty">Loading devices…</td></tr></tbody>
   </table>
   <div id="status"></div>
 </main>
@@ -90,12 +90,16 @@ function el(tag, text) { const e = document.createElement(tag); if (text !== und
 function row(d) {
   const tr = document.createElement('tr');
   tr.append(el('td', d.id), el('td', d.name || '—'), el('td', d.width + '×' + d.height),
-    el('td', pageNames[d.page] || String(d.page)), el('td', ago(d.last_seen)), el('td', String(d.frames)));
+    el('td', pageNames[d.page] || String(d.page)), el('td', d.pages.length ? String(d.pages.length) : 'all'),
+    el('td', ago(d.last_seen)), el('td', String(d.frames)));
   const td = el('td'); td.className = 'actions';
   const prev = el('button', 'Prev'); prev.onclick = () => act(d.id, 'prev');
   const next = el('button', 'Next'); next.onclick = () => act(d.id, 'next');
   const select = el('select');
-  pageNames.forEach((n, i) => { const o = el('option', n); o.value = n; o.selected = i === d.page; select.append(o); });
+  pageNames.forEach((n, i) => {
+    if (d.pages.length && !d.pages.includes(n)) return;
+    const o = el('option', n); o.value = n; o.selected = i === d.page; select.append(o);
+  });
   select.onchange = () => act(d.id, 'page', { name: select.value });
   const input = el('input'); input.placeholder = 'Message'; input.maxLength = 200; input.value = d.message || '';
   input.onkeydown = e => { if (e.key === 'Enter') act(d.id, 'message', { text: input.value }); };
@@ -112,7 +116,7 @@ async function loadDevices() {
   const body = document.getElementById('devices');
   body.replaceChildren();
   if (list.length === 0) {
-    const td = el('td', 'No board has fetched a frame yet.'); td.colSpan = 7; td.className = 'empty';
+    const td = el('td', 'No board has fetched a frame yet.'); td.colSpan = 8; td.className = 'empty';
     const tr = el('tr'); tr.append(td); body.append(tr);
     return;
   }

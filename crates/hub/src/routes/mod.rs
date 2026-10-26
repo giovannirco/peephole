@@ -34,6 +34,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/devices/{id}/message", post(devices::message))
         .route("/api/devices/{id}/name", post(devices::name))
         .route("/api/devices/{id}/cycle", post(devices::cycle))
+        .route("/api/devices/{id}/pages", post(devices::pages))
         .route("/api/plugins/{name}/poll", post(plugins::poll))
         .route("/flash", get(flash::redirect))
         .route("/flash/", get(flash::page))

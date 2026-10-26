@@ -263,6 +263,7 @@ async fn demo_mode_forbids_every_post() {
         ("message", Some(json!({"text": "hi"}))),
         ("name", Some(json!({"name": "x"}))),
         ("cycle", Some(json!({"cycle_s": 5}))),
+        ("pages", Some(json!({"pages": ["beta"]}))),
     ] {
         let (status, body) = post(&app, &format!("/api/devices/m1/{action}"), body).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{action}");
@@ -411,6 +412,7 @@ async fn index_lists_every_page_and_marks_demo_mode() {
     assert!(html.contains(r#"/pages/alpha.png?w=640&amp;h=340"#), "{html}");
     assert!(html.contains(r#"/pages/beta.png?w=640&amp;h=340"#));
     assert!(html.contains(r#"href="/flash/""#));
+    assert!(html.contains("<th>Pages</th>"));
     assert!(!html.contains(">DEMO<"));
     let (_, _, body) = get(&router(hub(true)), "/").await;
     assert!(String::from_utf8(body.to_vec()).unwrap().contains(">DEMO<"));
@@ -456,4 +458,50 @@ async fn poll_now_for_an_unknown_plugin_is_404() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(body["error"].as_str().unwrap().contains("nope"));
     scheduler.abort();
+}
+
+const FOUR: &str = "hub: {cycle_s: 0}\npages: [{name: a}, {name: b}, {name: c}, {name: d}]\n";
+
+#[tokio::test]
+async fn a_page_list_limits_next_prev_and_set_page() {
+    let app = router(hub_with(settings(false, None, None), FOUR));
+    register(&app, "m1").await;
+    let (status, dev) = post(&app, "/api/devices/m1/pages", Some(json!({"pages": ["b", "d"]}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dev["pages"], json!(["b", "d"]));
+    assert_eq!(dev["page"], 1);
+    let (_, dev) = post(&app, "/api/devices/m1/next", None).await;
+    assert_eq!(dev["page"], 3);
+    let (_, dev) = post(&app, "/api/devices/m1/next", None).await;
+    assert_eq!(dev["page"], 1);
+    let (_, dev) = post(&app, "/api/devices/m1/prev", None).await;
+    assert_eq!(dev["page"], 3);
+    let (status, body) = post(&app, "/api/devices/m1/page", Some(json!({"name": "a"}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("\"a\""));
+    let (_, _, body) = get(&app, "/api/devices").await;
+    assert_eq!(json_of(&body)[0]["pages"], json!(["b", "d"]));
+}
+
+#[tokio::test]
+async fn an_empty_page_list_means_every_page() {
+    let app = router(hub_with(settings(false, None, None), FOUR));
+    register(&app, "m1").await;
+    post(&app, "/api/devices/m1/pages", Some(json!({"pages": ["c"]}))).await;
+    let (status, dev) = post(&app, "/api/devices/m1/pages", Some(json!({"pages": []}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dev["pages"], json!([]));
+    let (_, dev) = post(&app, "/api/devices/m1/next", None).await;
+    assert_eq!(dev["page"], 3);
+}
+
+#[tokio::test]
+async fn a_page_list_with_unknown_names_is_400_naming_them() {
+    let app = router(hub_with(settings(false, None, None), FOUR));
+    register(&app, "m1").await;
+    let (status, body) = post(&app, "/api/devices/m1/pages", Some(json!({"pages": ["a", "zz"]}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("zz"));
+    let (status, _) = post(&app, "/api/devices/ghost/pages", Some(json!({"pages": []}))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

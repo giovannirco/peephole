@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 /// A screen that fetches frames. `id` is whatever the firmware sends (its MAC).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -28,6 +29,32 @@ pub struct Device {
     pub hold: Option<Hold>,
     #[serde(default)]
     pub frames: u64,
+    /// Page names this device steps and cycles through, in order; empty = every page.
+    #[serde(default)]
+    pub pages: Vec<String>,
+}
+
+impl Device {
+    /// Global page indices this device steps and cycles through: its list, or every page.
+    fn rotation(&self, page_names: &[String]) -> Vec<usize> {
+        let listed: Vec<usize> =
+            self.pages.iter().filter_map(|name| page_names.iter().position(|p| p == name)).collect();
+        if listed.is_empty() { (0..page_names.len()).collect() } else { listed }
+    }
+}
+
+#[derive(Debug, Error, PartialEq)]
+pub enum PageError {
+    #[error("pages are not configured: {}", quoted(.0))]
+    Unknown(Vec<String>),
+    #[error("page {0:?} is listed twice")]
+    Duplicate(String),
+    #[error("page {0:?} is not in this device's page list")]
+    NotInList(String),
+}
+
+fn quoted(names: &[String]) -> String {
+    names.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>().join(", ")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -79,6 +106,7 @@ impl Registry {
             page_since: now,
             hold: None,
             frames: 0,
+            pages: Vec::new(),
         });
         d.width = width;
         d.height = height;
@@ -111,25 +139,68 @@ impl Registry {
         out
     }
 
-    /// Move `delta` pages (wrapping) and reset the cycle timer; clears any hold.
-    pub fn step(&self, id: &str, delta: i64, page_count: usize, now: DateTime<Utc>) -> Option<Device> {
-        if page_count == 0 {
+    /// Move `delta` pages (wrapping) within the device's rotation and reset the cycle timer; clears any hold.
+    /// From a page outside the rotation it lands on the rotation's first page.
+    pub fn step(&self, id: &str, delta: i64, page_names: &[String], now: DateTime<Utc>) -> Option<Device> {
+        if page_names.is_empty() {
             return self.get(id);
         }
         self.update(id, |d| {
-            let n = page_count as i64;
-            d.page = (((d.page as i64 + delta) % n + n) % n) as usize;
+            let rotation = d.rotation(page_names);
+            d.page = match rotation.iter().position(|i| *i == d.page) {
+                Some(at) => rotation[(at as i64 + delta).rem_euclid(rotation.len() as i64) as usize],
+                None => rotation[0],
+            };
             d.page_since = now;
             d.hold = None;
         })
     }
 
-    pub fn set_page(&self, id: &str, page: usize, now: DateTime<Utc>) -> Option<Device> {
-        self.update(id, |d| {
+    /// Show the page `name`; with a page list it must be one of the listed pages.
+    pub fn set_page(
+        &self,
+        id: &str,
+        name: &str,
+        page_names: &[String],
+        now: DateTime<Utc>,
+    ) -> Result<Option<Device>, PageError> {
+        let page =
+            page_names.iter().position(|n| n == name).ok_or_else(|| PageError::Unknown(vec![name.to_owned()]))?;
+        let Some(device) = self.get(id) else { return Ok(None) };
+        if !device.pages.is_empty() && !device.pages.iter().any(|n| n == name) {
+            return Err(PageError::NotInList(name.to_owned()));
+        }
+        Ok(self.update(id, |d| {
             d.page = page;
             d.page_since = now;
             d.hold = None;
-        })
+        }))
+    }
+
+    /// Restrict the device to `pages` (in that order; empty = every page). When the current page is not
+    /// in the list the device moves to its first entry.
+    pub fn set_pages(
+        &self,
+        id: &str,
+        pages: Vec<String>,
+        page_names: &[String],
+        now: DateTime<Utc>,
+    ) -> Result<Option<Device>, PageError> {
+        let unknown: Vec<String> = pages.iter().filter(|n| !page_names.contains(n)).cloned().collect();
+        if !unknown.is_empty() {
+            return Err(PageError::Unknown(unknown));
+        }
+        if let Some(twice) = pages.iter().enumerate().find(|(i, n)| pages[..*i].contains(n)).map(|(_, n)| n) {
+            return Err(PageError::Duplicate(twice.clone()));
+        }
+        Ok(self.update(id, |d| {
+            d.pages = pages;
+            let rotation = d.rotation(page_names);
+            if !rotation.contains(&d.page) {
+                d.page = rotation[0];
+                d.page_since = now;
+            }
+        }))
     }
 
     pub fn set_message(&self, id: &str, message: &str) -> Option<Device> {
@@ -160,13 +231,7 @@ impl Registry {
         {
             return Some(i);
         }
-        let mut page = d.page.min(page_names.len() - 1);
-        let mut since = d.page_since;
-        let elapsed = (now - d.page_since).num_seconds().max(0) as u64;
-        if let Some(steps) = elapsed.checked_div(d.cycle_s).filter(|s| *s > 0) {
-            page = (page + steps as usize) % page_names.len();
-            since = d.page_since + Duration::seconds((steps * d.cycle_s) as i64);
-        }
+        let (page, since) = cycled(&d, &d.rotation(page_names), now);
         if page != d.page || since != d.page_since || d.hold.is_some() {
             self.update(id, |d| {
                 d.page = page;
@@ -190,6 +255,20 @@ impl Registry {
             }
             Err(e) => tracing::warn!(error = %e, "could not serialise devices"),
         }
+    }
+}
+
+/// Where the cycle has taken `d` by `now` within `rotation`, and when that page started.
+/// A page outside the rotation starts over on its first page.
+fn cycled(d: &Device, rotation: &[usize], now: DateTime<Utc>) -> (usize, DateTime<Utc>) {
+    let Some(at) = rotation.iter().position(|i| *i == d.page) else { return (rotation[0], now) };
+    let elapsed = (now - d.page_since).num_seconds().max(0) as u64;
+    match elapsed.checked_div(d.cycle_s).filter(|s| *s > 0) {
+        Some(steps) => (
+            rotation[(at + steps as usize) % rotation.len()],
+            d.page_since + Duration::seconds((steps * d.cycle_s) as i64),
+        ),
+        None => (d.page, d.page_since),
     }
 }
 
@@ -217,9 +296,9 @@ mod tests {
         let r = Registry::new(0);
         let t = Utc::now();
         r.touch("m", 320, 170, t);
-        assert_eq!(r.step("m", -1, 3, t).unwrap().page, 2);
-        assert_eq!(r.step("m", 1, 3, t).unwrap().page, 0);
-        assert_eq!(r.step("m", 4, 3, t).unwrap().page, 1);
+        assert_eq!(r.step("m", -1, &names(), t).unwrap().page, 2);
+        assert_eq!(r.step("m", 1, &names(), t).unwrap().page, 0);
+        assert_eq!(r.step("m", 4, &names(), t).unwrap().page, 1);
     }
 
     #[test]
@@ -231,7 +310,7 @@ mod tests {
         assert_eq!(r.current_page("m", &names(), t0 + Duration::seconds(25)), Some(2));
         assert_eq!(r.current_page("m", &names(), t0 + Duration::seconds(32)), Some(0));
         let t1 = t0 + Duration::seconds(33);
-        r.step("m", 1, 3, t1);
+        r.step("m", 1, &names(), t1);
         assert_eq!(r.current_page("m", &names(), t1 + Duration::seconds(9)), Some(1));
         assert_eq!(r.current_page("m", &names(), t1 + Duration::seconds(11)), Some(2));
     }
@@ -257,5 +336,130 @@ mod tests {
         r.set_message("m", "hello");
         let r2 = Registry::new(10).with_file(&path).unwrap();
         assert_eq!(r2.get("m").unwrap().message, "hello");
+    }
+
+    fn four() -> Vec<String> {
+        ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect()
+    }
+
+    fn listed(cycle_s: u64, list: &[&str], t: DateTime<Utc>) -> Registry {
+        let r = Registry::new(cycle_s);
+        r.touch("m", 320, 170, t);
+        r.set_pages("m", list.iter().map(|s| s.to_string()).collect(), &four(), t).unwrap();
+        r
+    }
+
+    #[test]
+    fn setting_a_page_list_moves_to_its_first_page_when_the_current_one_is_not_in_it() {
+        let t = Utc::now();
+        let d = listed(0, &["b", "d"], t).get("m").unwrap();
+        assert_eq!(d.pages, vec!["b", "d"]);
+        assert_eq!(d.page, 1);
+    }
+
+    #[test]
+    fn next_and_prev_wrap_inside_the_page_list() {
+        let t = Utc::now();
+        let r = listed(0, &["b", "d"], t);
+        assert_eq!(r.step("m", 1, &four(), t).unwrap().page, 3);
+        assert_eq!(r.step("m", 1, &four(), t).unwrap().page, 1);
+        assert_eq!(r.step("m", -1, &four(), t).unwrap().page, 3);
+        assert_eq!(r.step("m", -1, &four(), t).unwrap().page, 1);
+    }
+
+    #[test]
+    fn stepping_from_a_page_outside_the_list_lands_on_its_first_entry() {
+        let t = Utc::now();
+        let r = listed(0, &["b", "d"], t);
+        r.update("m", |d| d.page = 2);
+        assert_eq!(r.step("m", 1, &four(), t).unwrap().page, 1);
+        r.update("m", |d| d.page = 0);
+        assert_eq!(r.step("m", -1, &four(), t).unwrap().page, 1);
+    }
+
+    #[test]
+    fn the_cycle_advances_only_inside_the_page_list() {
+        let t0 = Utc::now();
+        let r = listed(10, &["b", "d"], t0);
+        assert_eq!(r.current_page("m", &four(), t0 + Duration::seconds(5)), Some(1));
+        assert_eq!(r.current_page("m", &four(), t0 + Duration::seconds(11)), Some(3));
+        assert_eq!(r.current_page("m", &four(), t0 + Duration::seconds(21)), Some(1));
+        assert_eq!(r.current_page("m", &four(), t0 + Duration::seconds(31)), Some(3));
+    }
+
+    #[test]
+    fn the_cycle_starts_from_the_first_list_entry_when_on_a_page_outside_it() {
+        let t0 = Utc::now();
+        let r = listed(10, &["b", "d"], t0);
+        r.update("m", |d| d.page = 2);
+        assert_eq!(r.current_page("m", &four(), t0 + Duration::seconds(1)), Some(1));
+        assert_eq!(r.get("m").unwrap().page, 1);
+    }
+
+    #[test]
+    fn a_hold_shows_its_page_even_outside_the_list() {
+        let t0 = Utc::now();
+        let r = listed(0, &["b", "d"], t0);
+        r.hold_all("a", std::time::Duration::from_secs(20), "ring", t0);
+        assert_eq!(r.current_page("m", &four(), t0 + Duration::seconds(5)), Some(0));
+        assert_eq!(r.current_page("m", &four(), t0 + Duration::seconds(25)), Some(1));
+    }
+
+    #[test]
+    fn unknown_page_names_are_rejected_by_name() {
+        let r = Registry::new(0);
+        let t = Utc::now();
+        r.touch("m", 320, 170, t);
+        let err = r.set_pages("m", vec!["b".into(), "x".into(), "y".into()], &four(), t).unwrap_err();
+        assert_eq!(err, PageError::Unknown(vec!["x".into(), "y".into()]));
+        assert!(err.to_string().contains("\"x\"") && err.to_string().contains("\"y\""), "{err}");
+        assert!(r.get("m").unwrap().pages.is_empty());
+    }
+
+    #[test]
+    fn a_page_listed_twice_is_rejected() {
+        let r = Registry::new(0);
+        let t = Utc::now();
+        r.touch("m", 320, 170, t);
+        let err = r.set_pages("m", vec!["b".into(), "b".into()], &four(), t).unwrap_err();
+        assert_eq!(err, PageError::Duplicate("b".into()));
+    }
+
+    #[test]
+    fn an_empty_list_means_every_page() {
+        let t = Utc::now();
+        let r = listed(0, &["b", "d"], t);
+        let d = r.set_pages("m", vec![], &four(), t).unwrap().unwrap();
+        assert!(d.pages.is_empty());
+        assert_eq!(r.step("m", 1, &four(), t).unwrap().page, 2);
+        assert_eq!(r.step("m", 1, &four(), t).unwrap().page, 3);
+        assert_eq!(r.step("m", 1, &four(), t).unwrap().page, 0);
+    }
+
+    #[test]
+    fn set_pages_on_an_unknown_device_is_none() {
+        assert_eq!(Registry::new(0).set_pages("ghost", vec![], &four(), Utc::now()), Ok(None));
+    }
+
+    #[test]
+    fn set_page_by_name_stays_inside_the_list() {
+        let t = Utc::now();
+        let r = listed(0, &["b", "d"], t);
+        assert_eq!(r.set_page("m", "d", &four(), t).unwrap().unwrap().page, 3);
+        assert_eq!(r.set_page("m", "a", &four(), t), Err(PageError::NotInList("a".into())));
+        assert_eq!(r.set_page("m", "zz", &four(), t), Err(PageError::Unknown(vec!["zz".into()])));
+        assert_eq!(r.get("m").unwrap().page, 3);
+        let free = Registry::new(0);
+        free.touch("m", 320, 170, t);
+        assert_eq!(free.set_page("m", "c", &four(), t).unwrap().unwrap().page, 2);
+    }
+
+    #[test]
+    fn devices_saved_before_page_lists_still_load() {
+        let json = r#"{"m": {"id": "m", "width": 320, "height": 170, "page": 1, "cycle_s": 10,
+            "first_seen": "2026-10-25T00:00:00Z", "last_seen": "2026-10-25T00:00:00Z",
+            "page_since": "2026-10-25T00:00:00Z"}}"#;
+        let devices: BTreeMap<String, Device> = serde_json::from_str(json).unwrap();
+        assert!(devices["m"].pages.is_empty());
     }
 }
