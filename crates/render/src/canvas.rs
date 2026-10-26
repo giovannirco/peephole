@@ -36,11 +36,6 @@ impl Canvas {
         (self.pixmap.width() as f32 / self.scale).round() as i32
     }
 
-    /// Height in design space.
-    pub fn height(&self) -> i32 {
-        (self.pixmap.height() as f32 / self.scale).round() as i32
-    }
-
     fn transform(&self) -> Transform {
         Transform::from_scale(self.scale, self.scale)
     }
@@ -280,8 +275,8 @@ mod tests {
     fn scaled_canvas_reports_design_size() {
         let c = Canvas::new_scaled(640, 340, 2.0);
         assert_eq!((c.pixmap.width(), c.pixmap.height()), (640, 340));
-        assert_eq!((c.width(), c.height()), (320, 170));
-        assert_eq!((Canvas::new(320, 170).width(), Canvas::new(320, 170).height()), (320, 170));
+        assert_eq!(c.width(), 320);
+        assert_eq!(Canvas::new(320, 170).width(), 320);
     }
 
     #[test]
