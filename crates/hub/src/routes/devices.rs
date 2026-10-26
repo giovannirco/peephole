@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use chrono::Utc;
-use peephole_core::Device;
+use peephole_core::{Device, PageError};
 use serde::Deserialize;
 
 use super::{ApiError, JsonBody};
@@ -18,7 +18,7 @@ fn found(id: &str, device: Option<Device>) -> DeviceResult {
 }
 
 fn step(state: &AppState, id: &str, delta: i64) -> DeviceResult {
-    found(id, state.registry.step(id, delta, state.cfg.pages.len(), Utc::now()))
+    found(id, state.registry.step(id, delta, &state.page_names(), Utc::now()))
 }
 
 pub async fn next(State(state): State<AppState>, Path(id): Path<String>) -> DeviceResult {
@@ -39,10 +39,28 @@ pub async fn page(
     Path(id): Path<String>,
     JsonBody(body): JsonBody<PageBody>,
 ) -> DeviceResult {
-    let index = state
-        .page_index(&body.name)
-        .ok_or_else(|| ApiError::not_found(format!("page {:?} is not configured", body.name)))?;
-    found(&id, state.registry.set_page(&id, index, Utc::now()))
+    match state.registry.set_page(&id, &body.name, &state.page_names(), Utc::now()) {
+        Ok(device) => found(&id, device),
+        Err(PageError::Unknown(_)) => Err(ApiError::not_found(format!("page {:?} is not configured", body.name))),
+        Err(e) => Err(ApiError::bad_request(e.to_string())),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PagesBody {
+    pages: Vec<String>,
+}
+
+pub async fn pages(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    JsonBody(body): JsonBody<PagesBody>,
+) -> DeviceResult {
+    let device = state
+        .registry
+        .set_pages(&id, body.pages, &state.page_names(), Utc::now())
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    found(&id, device)
 }
 
 #[derive(Deserialize)]

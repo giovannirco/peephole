@@ -6,6 +6,10 @@ use thiserror::Error;
 
 use crate::page::Page;
 
+mod redact;
+
+pub use redact::{RedactedPlugin, redact, redact_text, redact_url};
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("environment variable {0} is not set (referenced as ${{{0}}} in the config)")]
@@ -79,6 +83,9 @@ pub struct Config {
     pub plugins: Vec<PluginEntry>,
     #[serde(default)]
     pub pages: Vec<Page>,
+    /// The plugins' settings as written, safe to show: env references by name, secrets hidden.
+    #[serde(skip)]
+    pub redacted: Vec<RedactedPlugin>,
 }
 
 impl Config {
@@ -90,10 +97,16 @@ impl Config {
     }
 
     /// Parse YAML after replacing `${VAR}` / `${VAR:-default}` with values from `lookup`.
+    /// Also keeps [`Config::redacted`], computed from the unexpanded text.
     pub fn parse(text: &str, lookup: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
-        let expanded = expand_env(text, lookup)?;
-        let cfg: Config = serde_yaml::from_str(&expanded)?;
+        let expanded = expand_env(text, &lookup)?;
+        let mut cfg: Config = serde_yaml::from_str(&expanded)?;
         cfg.validate()?;
+        cfg.redacted = redact(text, &lookup)?;
+        for (shown, entry) in cfg.redacted.iter_mut().zip(&cfg.plugins) {
+            shown.name = entry.name().to_owned();
+            shown.kind = entry.kind.clone();
+        }
         Ok(cfg)
     }
 
@@ -120,6 +133,18 @@ impl Config {
 
 /// Replace `${VAR}` and `${VAR:-default}`; a missing variable without default is an error.
 pub fn expand_env(text: &str, lookup: impl Fn(&str) -> Option<String>) -> Result<String, ConfigError> {
+    replace_refs(text, |name, default| match (lookup(name), default) {
+        (Some(v), _) => Ok(v),
+        (None, Some(d)) => Ok(d.to_owned()),
+        (None, None) => Err(ConfigError::MissingEnv(name.to_owned())),
+    })
+}
+
+/// Replace every `${NAME}` / `${NAME:-default}` with what `replace(NAME, default)` returns.
+fn replace_refs(
+    text: &str,
+    mut replace: impl FnMut(&str, Option<&str>) -> Result<String, ConfigError>,
+) -> Result<String, ConfigError> {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find("${") {
@@ -133,13 +158,7 @@ pub fn expand_env(text: &str, lookup: impl Fn(&str) -> Option<String>) -> Result
             Some((n, d)) => (n, Some(d)),
             None => (inner, None),
         };
-        match lookup(name) {
-            Some(v) => out.push_str(&v),
-            None => match default {
-                Some(d) => out.push_str(d),
-                None => return Err(ConfigError::MissingEnv(name.to_owned())),
-            },
-        }
+        out.push_str(&replace(name, default)?);
         rest = &after[end + 1..];
     }
     out.push_str(rest);

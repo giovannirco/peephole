@@ -39,17 +39,16 @@ async fn run() -> Result<()> {
     let registry = state::open_registry(&settings, &cfg)?;
     let (events, receiver) = broadcast::channel(EVENT_BACKLOG);
     let holds = state::spawn_event_holds(registry.clone(), receiver);
-    let tasks = scheduler::run(plugins, store.clone(), events);
+    let intervals = state::intervals(&plugins);
+    let scheduler = scheduler::run(plugins, store.clone(), events);
     let (pages, plugin_count) = (cfg.pages.len(), cfg.plugins.len());
-    let app = router(Hub::new(&settings, cfg, store, registry));
+    let app = router(Hub::new(&settings, cfg, store, registry, intervals, scheduler.triggers()));
     let listener = tokio::net::TcpListener::bind(settings.listen)
         .await
         .with_context(|| format!("binding PEEPHOLE_LISTEN {}", settings.listen))?;
     tracing::info!(addr = %settings.listen, pages, plugins = plugin_count, demo = settings.demo, "peephole hub listening");
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await.context("serving HTTP")?;
-    for task in tasks {
-        task.abort();
-    }
+    scheduler.abort();
     holds.abort();
     tracing::info!("stopped");
     Ok(())

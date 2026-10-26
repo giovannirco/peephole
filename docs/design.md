@@ -19,13 +19,20 @@ Registered on their first `GET /frame.png?id=…&w=…&h=…`. Each has a curren
 |---|---|
 | `GET /frame.png?id&w&h` | the device's current frame (registers the device) |
 | `GET /pages/{name}.png?w&h` | any page, for the browser |
-| `GET /api/pages`, `/api/devices`, `/api/devices/{id}`, `/api/values`, `/api/config` | read |
-| `POST /api/devices/{id}/next|prev|page|message|name|cycle` | the only actions (403 in demo mode) |
+| `GET /api/pages`, `/api/devices`, `/api/devices/{id}`, `/api/values`, `/api/config`, `/api/plugins`, `/api/settings` | read |
+| `POST /api/devices/{id}/next|prev|page|message|name|cycle|pages`, `POST /api/plugins/{name}/poll` | the only actions (403 in demo mode, 401 without the token when `PEEPHOLE_API_TOKEN` is set) |
+| `GET /settings` | the settings panel |
 | `GET /flash/`, `/flash/manifest.json`, `/firmware/*` | ESP Web Tools flashing |
 | `GET /healthz` | liveness |
 
 ## Security posture
 Read-only by design: plugins read, the device never holds a credential, the hub's actions change nothing outside the hub. Put the hub behind your ingress with TLS (WebSerial requires HTTPS anyway). The public demo runs with `PEEPHOLE_DEMO=1`: synthetic data, actions refused.
+
+## v0.2
+- **Settings panel shows, does not edit.** The YAML and the environment stay the configuration. `/settings` and `/api/settings` show them from the *unexpanded* text: a `${VAR}` appears by name with whether it is set (its default too, except under a secret key); strings, numbers and booleans under keys that look secret, and every header, appear as `{"secret": true}`; URLs lose their userinfo and secret query values; poll errors go through the same URL filter. No expanded value reaches a response. Only device settings are editable.
+- **Page lists.** A device may carry `pages`, an ordered subset of page names. Buttons and the cycle move inside it (wrapping); from a page outside it they land on its first entry; `page` by name must be in it; a plugin event (hold) may still show any page. Empty = every page.
+- **Poll now.** The scheduler wakes a plugin's loop on demand without moving its interval; each poll writes `<plugin>/_polled_at`, and `<plugin>/_values` on success.
+- **Optional token.** `PEEPHOLE_API_TOKEN` guards every `POST` with a bearer token compared without early exit; GETs stay open for boards and dashboards. Demo mode refuses POSTs first (403).
 
 ## Out of scope for now
 Home Assistant integration, OTA from the hub, WASM plugins (any language), a static WASM build of the renderer for GitHub Pages, per-size layouts, write actions against Proxmox or Kubernetes.

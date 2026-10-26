@@ -1,3 +1,4 @@
+use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -7,6 +8,16 @@ use peephole_core::Config;
 const DEMO_CONFIG: &str = include_str!("../../../examples/demo.yaml");
 const DEMO_KINDS: &[&str] = &["clock", "demo"];
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
+/// Every variable the hub reads, in the order the settings panel lists them.
+pub const VARIABLES: &[&str] = &[
+    "PEEPHOLE_CONFIG",
+    "PEEPHOLE_LISTEN",
+    "PEEPHOLE_DEMO",
+    "PEEPHOLE_STATE",
+    "PEEPHOLE_FIRMWARE_DIR",
+    "PEEPHOLE_PUBLIC_URL",
+    "PEEPHOLE_API_TOKEN",
+];
 
 /// Everything the hub reads from the environment, resolved once at startup.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,6 +28,31 @@ pub struct Settings {
     pub state_file: Option<PathBuf>,
     pub firmware_dir: Option<PathBuf>,
     pub public_url: Option<String>,
+    pub api_token: Option<ApiToken>,
+    /// The variables of [`VARIABLES`] that were set (non-empty).
+    pub set_variables: Vec<&'static str>,
+}
+
+/// The bearer token every `POST` must carry when set. `Debug` never prints it.
+#[derive(Clone, PartialEq)]
+pub struct ApiToken(String);
+
+impl ApiToken {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    /// Compare without returning at the first differing byte.
+    pub fn matches(&self, presented: &str) -> bool {
+        let (want, got) = (self.0.as_bytes(), presented.as_bytes());
+        want.len() == got.len() && want.iter().zip(got).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+    }
+}
+
+impl fmt::Debug for ApiToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ApiToken(<set>)")
+    }
 }
 
 impl Settings {
@@ -49,7 +85,14 @@ impl Settings {
             state_file: get("PEEPHOLE_STATE").map(PathBuf::from),
             firmware_dir,
             public_url: get("PEEPHOLE_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_owned()),
+            api_token: get("PEEPHOLE_API_TOKEN").map(|t| ApiToken::new(t.trim())),
+            set_variables: VARIABLES.iter().copied().filter(|v| get(v).is_some()).collect(),
         })
+    }
+
+    /// Each variable the hub reads and whether it was set; never the values.
+    pub fn env_status(&self) -> Vec<(&'static str, bool)> {
+        VARIABLES.iter().map(|v| (*v, self.set_variables.contains(v))).collect()
     }
 
     /// Read the config file (or the built-in demo config in demo mode when the file is absent).
@@ -132,6 +175,47 @@ mod tests {
         assert_eq!(s.state_file, Some(PathBuf::from("/var/lib/peephole/devices.json")));
         assert_eq!(s.firmware_dir, Some(PathBuf::from(&fw)));
         assert_eq!(s.public_url.as_deref(), Some("https://peephole.example.invalid"));
+    }
+
+    #[test]
+    fn api_token_is_trimmed_and_never_printed() {
+        let s =
+            Settings::from_lookup(env(&[("PEEPHOLE_CONFIG", "/c"), ("PEEPHOLE_API_TOKEN", "  s3cret-tok  ")])).unwrap();
+        let token = s.api_token.as_ref().expect("token set");
+        assert!(token.matches("s3cret-tok"));
+        assert!(!token.matches("s3cret-to"));
+        assert!(!token.matches("s3cret-tok "));
+        assert!(!format!("{s:?}").contains("s3cret"), "{s:?}");
+    }
+
+    #[test]
+    fn an_empty_api_token_is_unset() {
+        let s = Settings::from_lookup(env(&[("PEEPHOLE_CONFIG", "/c"), ("PEEPHOLE_API_TOKEN", "   ")])).unwrap();
+        assert!(s.api_token.is_none());
+        assert!(Settings::from_lookup(env(&[("PEEPHOLE_CONFIG", "/c")])).unwrap().api_token.is_none());
+    }
+
+    #[test]
+    fn env_status_lists_every_known_variable_and_whether_it_was_set() {
+        let s = Settings::from_lookup(env(&[
+            ("PEEPHOLE_CONFIG", "/c"),
+            ("PEEPHOLE_API_TOKEN", "t"),
+            ("PEEPHOLE_STATE", " "),
+            ("OTHER", "x"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            s.env_status(),
+            vec![
+                ("PEEPHOLE_CONFIG", true),
+                ("PEEPHOLE_LISTEN", false),
+                ("PEEPHOLE_DEMO", false),
+                ("PEEPHOLE_STATE", false),
+                ("PEEPHOLE_FIRMWARE_DIR", false),
+                ("PEEPHOLE_PUBLIC_URL", false),
+                ("PEEPHOLE_API_TOKEN", true),
+            ]
+        );
     }
 
     #[test]
