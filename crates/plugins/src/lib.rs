@@ -11,8 +11,8 @@ pub mod cliproxyapi;
 pub mod clock;
 pub mod demo;
 pub mod homarr;
-pub mod homepage;
 pub mod home_assistant;
+pub mod homepage;
 mod http;
 pub mod http_json;
 mod insecure_tls;
@@ -26,12 +26,27 @@ pub mod technitium;
 pub mod unifi_network;
 pub mod unifi_protect;
 pub mod uptime_kuma;
+pub mod waha;
 
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "proxmox", "technitium", "homepage", "homarr", "uptime_kuma", "unifi_network"]
-pub mod waha;
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "cliproxyapi", "home_assistant", "waha"]
+    &[
+        "clock",
+        "demo",
+        "prometheus",
+        "http_json",
+        "mempool",
+        "unifi_protect",
+        "proxmox",
+        "technitium",
+        "homepage",
+        "homarr",
+        "uptime_kuma",
+        "unifi_network",
+        "cliproxyapi",
+        "home_assistant",
+        "waha",
+    ]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
