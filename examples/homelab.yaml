@@ -510,12 +510,12 @@ pages:
     title: GitOps
     cards:
       - {x: 6, y: 24, w: 152, h: 70, accent: ok, title: argo cd, widgets: [
-          {kind: text, x: 8, y: 18, text: "{{k8s/local/argo_synced|int}} / {{k8s/local/argo_apps|int}} synced", font: mid},
+          {kind: text, x: 8, y: 18, text: "{{k8s/local/argo_synced|int}}/{{k8s/local/argo_apps|int}} synced", font: mid},
           {kind: text, x: 8, y: 38, text: "{{k8s/local/argo_healthy|int}} healthy", font: small, color: text2},
-          {kind: kpi, x: 100, y: 16, bind: k8s/local/argo_degraded, label: degraded, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
+          {kind: kpi, x: 104, y: 16, bind: k8s/local/argo_degraded, label: degraded, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
       - {x: 162, y: 24, w: 152, h: 70, accent: ok, title: flux, widgets: [
-          {kind: text, x: 8, y: 18, text: "{{k8s/local/flux_ready|int}} / {{k8s/local/flux_total|int}} ready", font: mid},
-          {kind: kpi, x: 100, y: 16, bind: k8s/local/flux_notready, label: not ready, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
+          {kind: text, x: 8, y: 18, text: "{{k8s/local/flux_ready|int}}/{{k8s/local/flux_total|int}} ready", font: mid},
+          {kind: kpi, x: 104, y: 16, bind: k8s/local/flux_notready, label: not ready, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
       - {x: 6, y: 100, w: 152, h: 64, accent: ok, title: certificates, widgets: [
           {kind: kpi, x: 8, y: 16, bind: k8s/local/cert_min_days, label: soonest expiry, unit: d, fmt: int, size: mid, thresholds: {warn: 20, bad: 7, invert: true}},
           {kind: text, x: 8, y: 46, text: "{{k8s/local/cert_soonest}}", font: small, color: text2}]}
