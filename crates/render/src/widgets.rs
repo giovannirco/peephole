@@ -369,12 +369,12 @@ impl Painter<'_> {
             let src = image::RgbaImage::from_raw(img.width, img.height, img.rgba.to_vec())?;
             let scale = (b.w as f64 / img.width as f64).min(b.h as f64 / img.height as f64);
             let (dw, dh) = (
-                ((img.width as f64 * scale).round() as u32).max(1),
-                ((img.height as f64 * scale).round() as u32).max(1),
+                ((img.width as f64 * scale).round() as i32).max(1),
+                ((img.height as f64 * scale).round() as i32).max(1),
             );
-            Some(image::imageops::resize(&src, dw, dh, image::imageops::FilterType::Triangle))
+            Some((src, dw, dh))
         });
-        let Some(pic) = fitted else {
+        let Some((src, dw, dh)) = fitted else {
             self.outline(b);
             self.cv.text(
                 b.x + b.w / 2,
@@ -386,9 +386,8 @@ impl Painter<'_> {
             );
             return;
         };
-        let (dw, dh) = (pic.width() as i32, pic.height() as i32);
         let (dx, dy) = (b.x + (b.w - dw) / 2, b.y + (b.h - dh) / 2);
-        self.cv.blit(dx, dy, &pic);
+        self.cv.blit(dx, dy, dw, dh, &src);
         self.outline(Boxed { x: dx, y: dy, w: dw, h: dh });
         if let Some(l) = label {
             self.cv.text(dx + 3, dy + 2, Font::Small, TEXT2, Align::Left, l);

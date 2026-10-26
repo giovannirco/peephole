@@ -164,8 +164,13 @@ impl Canvas {
         }
     }
 
-    /// Alpha-blend straight (non-premultiplied) RGBA pixels with their top-left at (`x`, `y`).
-    pub fn blit(&mut self, x: i32, y: i32, img: &image::RgbaImage) {
+    /// Resample `src` (straight, non-premultiplied RGBA) to the `w` × `h` box at (`x`, `y`) and
+    /// alpha-blend it.
+    pub fn blit(&mut self, x: i32, y: i32, w: i32, h: i32, src: &image::RgbaImage) {
+        let at = |v: i32| (v as f32 * self.scale).round() as i32;
+        let (sw, sh) = (at(w).max(1) as u32, at(h).max(1) as u32);
+        let img = image::imageops::resize(src, sw, sh, image::imageops::FilterType::Triangle);
+        let (x, y) = (at(x), at(y));
         let (pw, ph) = (self.pixmap.width() as i32, self.pixmap.height() as i32);
         let data = self.pixmap.data_mut();
         for (ix, iy, p) in img.enumerate_pixels() {
@@ -315,5 +320,16 @@ mod tests {
         l.polyline(&[(2.0, 10.0), (18.0, 10.0)], 2.0, OK);
         assert_eq!(at(&l, 20, 19), rgb(OK));
         assert_eq!(at(&l, 20, 22), rgb(BG));
+    }
+
+    #[test]
+    fn blit_fills_the_scaled_box() {
+        let red = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]));
+        let mut c = Canvas::new_scaled(40, 40, 2.0);
+        c.blit(5, 5, 10, 10, &red);
+        assert_eq!(at(&c, 10, 10), (255, 0, 0));
+        assert_eq!(at(&c, 29, 29), (255, 0, 0));
+        assert_eq!(at(&c, 9, 9), rgb(BG));
+        assert_eq!(at(&c, 30, 30), rgb(BG));
     }
 }
