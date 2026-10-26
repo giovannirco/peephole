@@ -30,6 +30,10 @@ pub struct Field {
     pub kind: FieldKind,
     /// A second pointer: the field becomes `pointer / over` (0 when `over` reads 0). Numbers only.
     pub over: Option<String>,
+    /// For `series`: a pointer into each array entry, e.g. `/1` for `[ts, value]` pairs or `/value` for objects.
+    pub element: Option<String>,
+    /// For `series`: keep only the last N points.
+    pub last: Option<usize>,
 }
 
 impl Field {
@@ -37,17 +41,22 @@ impl Field {
         if self.over.is_some() && self.kind != FieldKind::Number {
             anyhow::bail!("field {}: over needs kind number", self.key);
         }
+        if (self.element.is_some() || self.last.is_some()) && self.kind != FieldKind::Series {
+            anyhow::bail!("field {}: element and last need kind series", self.key);
+        }
         Ok(())
     }
 }
 
-/// `number` needs a JSON number (or a boolean, read as 1/0) and `text` a JSON string; anything else fails the field.
+/// `number` needs a JSON number (or a boolean, read as 1/0), `text` a JSON string and `series` a JSON array;
+/// anything else fails the field. Series entries that are not numbers become NaN (a gap).
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum FieldKind {
     #[default]
     Number,
     Text,
+    Series,
 }
 
 pub struct HttpJson {
@@ -94,6 +103,19 @@ fn ratio(a: f64, b: f64) -> f64 {
     if b == 0.0 { 0.0 } else { a / b }
 }
 
+fn series_at(body: &serde_json::Value, field: &Field) -> anyhow::Result<Vec<f64>> {
+    let found = at(body, &field.pointer)?;
+    let entries =
+        found.as_array().ok_or_else(|| anyhow::anyhow!("pointer {} holds {found}, not a Series", field.pointer))?;
+    let points: Vec<f64> = entries
+        .iter()
+        .map(|entry| field.element.as_deref().map_or(Some(entry), |element| entry.pointer(element)))
+        .map(|point| point.and_then(number).unwrap_or(f64::NAN))
+        .collect();
+    let skip = field.last.map_or(0, |last| points.len().saturating_sub(last));
+    Ok(points[skip..].to_vec())
+}
+
 fn extract(body: &serde_json::Value, field: &Field) -> anyhow::Result<Value> {
     match field.kind {
         FieldKind::Number => match &field.over {
@@ -104,6 +126,7 @@ fn extract(body: &serde_json::Value, field: &Field) -> anyhow::Result<Value> {
             serde_json::Value::String(s) => Ok(Value::Text(s.clone())),
             other => anyhow::bail!("pointer {} holds {other}, not a Text", field.pointer),
         },
+        FieldKind::Series => series_at(body, field).map(Value::Series),
     }
 }
 
@@ -224,6 +247,47 @@ fields:
         assert_eq!(got["z"], Value::Number(0.0));
         assert!(!got.contains_key("gone"));
         assert_eq!(got["_fields_failed"], Value::Number(1.0));
+    }
+
+    fn series(got: &BTreeMap<String, Value>, key: &str) -> Vec<f64> {
+        got[key].as_series().unwrap_or_else(|| panic!("{key} is not a series: {:?}", got[key])).to_vec()
+    }
+
+    #[tokio::test]
+    async fn series_read_numbers_pairs_and_objects_with_nan_for_bad_entries_and_last() {
+        let body = serde_json::json!({
+            "plain": [1, 2.5, 3],
+            "gpus": [{"history": [[1792984863, 0], [1792984923, 0.4], [1792984983, "x"], [1792985043, 0.9]]}],
+            "objects": [{"value": 5}, {"value": null}, {"other": 1}, {"value": 7}]
+        });
+        let fields = r#"
+fields:
+  - {key: plain, pointer: /plain, kind: series}
+  - {key: pairs, pointer: /gpus/0/history, kind: series, element: /1}
+  - {key: tail, pointer: /gpus/0/history, kind: series, element: /1, last: 2}
+  - {key: objects, pointer: /objects, kind: series, element: /value}
+  - {key: notarray, pointer: /objects/0, kind: series}
+"#;
+        let got = poll(body, fields).await;
+        assert_eq!(got["plain"], Value::Series(vec![1.0, 2.5, 3.0]));
+        let pairs = series(&got, "pairs");
+        assert_eq!(pairs.len(), 4);
+        assert_eq!((pairs[0], pairs[1], pairs[3]), (0.0, 0.4, 0.9));
+        assert!(pairs[2].is_nan());
+        let tail = series(&got, "tail");
+        assert!(tail.len() == 2 && tail[0].is_nan() && tail[1] == 0.9, "{tail:?}");
+        let objects = series(&got, "objects");
+        assert!(objects[0] == 5.0 && objects[1].is_nan() && objects[2].is_nan() && objects[3] == 7.0, "{objects:?}");
+        assert!(!got.contains_key("notarray"));
+        assert_eq!(got["_fields_failed"], Value::Number(1.0));
+    }
+
+    #[test]
+    fn element_or_last_without_kind_series_is_refused() {
+        let err = build("fields: [{key: cpu, pointer: /a, element: /1}]").err().unwrap().to_string();
+        assert!(err.contains("cpu") && err.contains("series"), "{err}");
+        let err = build("fields: [{key: cpu, pointer: /a, last: 3}]").err().unwrap().to_string();
+        assert!(err.contains("cpu") && err.contains("series"), "{err}");
     }
 
     fn build(yaml: &str) -> anyhow::Result<HttpJson> {
