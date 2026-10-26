@@ -2,7 +2,7 @@
 
 **A tiny window into your homelab.** Peephole renders dashboard pages for small ESP32 screens: a Rust hub polls your sources through plugins, draws every page as a frame, and the boards show the frames. The same frames appear in your browser, and the hub's flash page programs new boards over USB from the browser.
 
-> Status: v0.2, built in two evenings for one board (LilyGo T-Display-S3, 320×170). Twenty-two plugin kinds, a settings panel, page lists per device, crisp frames at any multiple of the design size (the browser and a GitHub profile README get 2× and 3×, the board 1×). It works; expect sharp edges.
+> Status: v0.2, built in two evenings for one board (LilyGo T-Display-S3, 320×170). Twenty-two plugin kinds, a settings panel, page lists per device, crisp frames at any multiple of the design size (2× or 3× for larger displays, 1× for the board). It works; expect sharp edges.
 
 ![demo pages](docs/screenshots/demo.png)
 
