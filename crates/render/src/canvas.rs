@@ -5,9 +5,11 @@ use tiny_skia::{ColorU8, FillRule, IntRect, LineCap, Paint, Path, PathBuilder, P
 use crate::color::{BG, CARD, EDGE};
 use crate::text::{self, Align, Font, Style};
 
-/// A page-sized opaque pixmap with the design system's primitives.
+/// A page-sized opaque pixmap with the design system's primitives. Every primitive takes
+/// design-space coordinates and sizes; `scale` maps them to pixmap pixels.
 pub struct Canvas {
     pub pixmap: Pixmap,
+    pub scale: f32,
 }
 
 fn paint(c: ColorU8, alpha: f32) -> Paint<'static> {
@@ -19,9 +21,24 @@ fn paint(c: ColorU8, alpha: f32) -> Paint<'static> {
 
 impl Canvas {
     pub fn new(w: u32, h: u32) -> Self {
+        Self::new_scaled(w, h, 1.0)
+    }
+
+    /// A `w` × `h` pixel canvas that draws design space at `scale` pixels per unit.
+    pub fn new_scaled(w: u32, h: u32, scale: f32) -> Self {
         let mut pixmap = Pixmap::new(w.max(1), h.max(1)).expect("canvas size is non-zero");
         pixmap.fill(tiny_skia::Color::from_rgba8(BG.red(), BG.green(), BG.blue(), 255));
-        Self { pixmap }
+        Self { pixmap, scale }
+    }
+
+    /// Width in design space.
+    pub fn width(&self) -> i32 {
+        (self.pixmap.width() as f32 / self.scale).round() as i32
+    }
+
+    /// Height in design space.
+    pub fn height(&self) -> i32 {
+        (self.pixmap.height() as f32 / self.scale).round() as i32
     }
 
     fn fill_path(&mut self, path: &Path, c: ColorU8, alpha: f32) {
@@ -33,9 +50,11 @@ impl Canvas {
         self.pixmap.stroke_path(path, &paint(c, 1.0), &stroke, Transform::identity(), None);
     }
 
-    /// Pixel-exact filled rectangle (no anti-aliasing).
+    /// Pixel-exact filled rectangle (no anti-aliasing); its edges round to whole scaled pixels.
     pub fn fill_rect(&mut self, x: i32, y: i32, w: i32, h: i32, c: ColorU8) {
-        let Some(r) = Rect::from_xywh(x as f32, y as f32, w as f32, h as f32) else { return };
+        let at = |v: i32| (v as f32 * self.scale).round();
+        let (x0, y0) = (at(x), at(y));
+        let Some(r) = Rect::from_xywh(x0, y0, at(x + w) - x0, at(y + h) - y0) else { return };
         let mut p = paint(c, 1.0);
         p.anti_alias = false;
         self.pixmap.fill_rect(r, &p, Transform::identity(), None);
@@ -244,5 +263,23 @@ mod tests {
         assert_eq!(at(&c, 5, 7), rgb(OK));
         assert_eq!(at(&c, 6, 7), rgb(BG));
         assert_eq!(at(&c, 5, 8), rgb(BG));
+    }
+
+    #[test]
+    fn scaled_canvas_reports_design_size() {
+        let c = Canvas::new_scaled(640, 340, 2.0);
+        assert_eq!((c.pixmap.width(), c.pixmap.height()), (640, 340));
+        assert_eq!((c.width(), c.height()), (320, 170));
+        assert_eq!((Canvas::new(320, 170).width(), Canvas::new(320, 170).height()), (320, 170));
+    }
+
+    #[test]
+    fn fill_rect_lands_on_scaled_pixels() {
+        let mut c = Canvas::new_scaled(80, 80, 2.0);
+        c.fill_rect(10, 10, 20, 20, OK);
+        assert_eq!(at(&c, 20, 20), rgb(OK));
+        assert_eq!(at(&c, 19, 19), rgb(BG));
+        assert_eq!(at(&c, 59, 59), rgb(OK));
+        assert_eq!(at(&c, 60, 60), rgb(BG));
     }
 }
