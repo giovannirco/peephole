@@ -9,12 +9,11 @@ use peephole_hub::state::{self, Hub};
 use tokio::sync::broadcast;
 use tracing_subscriber::EnvFilter;
 
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 const EVENT_BACKLOG: usize = 64;
 
-#[tokio::main]
+/// Four workers are plenty for a hub that polls and draws; one per CPU (the default) multiplies the allocator's
+/// per-thread caches on big nodes and turned into a steady RSS climb on a 32-core node.
+#[tokio::main(worker_threads = 4)]
 async fn main() -> ExitCode {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
