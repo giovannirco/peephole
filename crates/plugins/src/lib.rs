@@ -18,6 +18,7 @@ pub mod homepage;
 mod http;
 pub mod http_json;
 mod insecure_tls;
+pub mod job_scout;
 mod key;
 pub mod kubernetes;
 pub mod mempool;
@@ -25,6 +26,8 @@ mod partial;
 mod period;
 pub mod prometheus;
 pub mod proxmox;
+pub mod qbittorrent;
+pub mod servarr;
 pub mod technitium;
 pub mod unifi_network;
 pub mod unifi_protect;
@@ -54,6 +57,9 @@ pub fn kinds() -> &'static [&'static str] {
         "github",
         "x",
         "kubernetes",
+        "job_scout",
+        "qbittorrent",
+        "servarr",
     ]
 }
 
@@ -80,6 +86,9 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "github" => make(entry, github::Github::new),
         "x" => make(entry, x::X::new),
         "kubernetes" => make(entry, kubernetes::Kubernetes::new),
+        "job_scout" => make(entry, job_scout::JobScout::new),
+        "qbittorrent" => make(entry, qbittorrent::Qbittorrent::new),
+        "servarr" => make(entry, servarr::Servarr::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
 }
@@ -130,6 +139,9 @@ mod tests {
             "{kind: github, user: octo}",
             "{kind: x, bearer_token: t, username: octo}",
             "{kind: kubernetes, clusters: [{name: a, url: 'https://k8s.example.invalid:6443', token: t, insecure: true}]}",
+            "{kind: job_scout, url: 'https://jobs.example.invalid', token: t}",
+            "{kind: qbittorrent, servers: [{name: nas, url: 'http://qbit.example.invalid', username: u, password: p}]}",
+            "{kind: servarr, apps: [{name: movies, kind: radarr, url: 'https://radarr.example.invalid', api_key: k}]}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
             assert_eq!(build(&entry(yaml)).unwrap().name(), *kind);
