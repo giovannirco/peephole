@@ -2,6 +2,7 @@ mod api;
 mod devices;
 mod flash;
 mod frame;
+mod plugins;
 
 use axum::extract::{FromRequest, Request, State};
 use axum::http::{Method, StatusCode};
@@ -33,6 +34,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/devices/{id}/message", post(devices::message))
         .route("/api/devices/{id}/name", post(devices::name))
         .route("/api/devices/{id}/cycle", post(devices::cycle))
+        .route("/api/plugins/{name}/poll", post(plugins::poll))
         .route("/flash", get(flash::redirect))
         .route("/flash/", get(flash::page))
         .route("/flash/manifest.json", get(flash::manifest))

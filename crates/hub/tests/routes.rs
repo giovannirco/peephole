@@ -4,6 +4,7 @@ use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use http_body_util::BodyExt;
+use peephole_core::scheduler::{self, PollTriggers, Scheduler};
 use peephole_core::{Config, Registry, Store, Value};
 use peephole_hub::routes::router;
 use peephole_hub::settings::Settings;
@@ -40,7 +41,32 @@ fn settings(demo: bool, firmware_dir: Option<PathBuf>, public_url: Option<&str>)
 fn hub_with(settings: Settings, yaml: &str) -> AppState {
     let cfg = Config::parse(yaml, |_| None).unwrap();
     let registry = Registry::new(cfg.hub.cycle_s);
-    Hub::new(&settings, cfg, Store::new(), registry)
+    Hub::new(&settings, cfg, Store::new(), registry, PollTriggers::default())
+}
+
+fn running_hub(yaml: &str) -> (AppState, Scheduler) {
+    let cfg = Config::parse(yaml, |_| None).unwrap();
+    let plugins = cfg.plugins.iter().map(|e| peephole_plugins::build(e).unwrap()).collect();
+    let store = Store::new();
+    let (events, _) = tokio::sync::broadcast::channel(4);
+    let scheduler = scheduler::run(plugins, store.clone(), events);
+    let registry = Registry::new(cfg.hub.cycle_s);
+    (Hub::new(&settings(false, None, None), cfg, store, registry, scheduler.triggers()), scheduler)
+}
+
+async fn polled_at(
+    state: &AppState,
+    plugin: &str,
+    after: Option<chrono::DateTime<chrono::Utc>>,
+) -> chrono::DateTime<chrono::Utc> {
+    let key = format!("{plugin}/_polled_at");
+    for _ in 0..500 {
+        if let Some(s) = state.store.get(&key).filter(|s| after.is_none_or(|a| s.updated_at > a)) {
+            return s.updated_at;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    panic!("{plugin} was not polled");
 }
 
 fn hub(demo: bool) -> AppState {
@@ -242,6 +268,8 @@ async fn demo_mode_forbids_every_post() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{action}");
         assert!(body["error"].is_string(), "{action}");
     }
+    let (status, _) = post(&app, "/api/plugins/d/poll", None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
     let (_, _, body) = get(&app, "/api/devices/m1").await;
     assert_eq!(json_of(&body)["page"], 0);
 }
@@ -405,4 +433,27 @@ async fn unknown_routes_are_404_json() {
     let (status, _, body) = get(&app, "/nope").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(json_of(&body)["error"].is_string());
+}
+
+const SLOW: &str = "plugins: [{kind: demo, name: d, interval_s: 3600, values: {n: 1}}]\n";
+
+#[tokio::test]
+async fn poll_now_is_202_and_polls_the_plugin_again() {
+    let (state, scheduler) = running_hub(SLOW);
+    let first = polled_at(&state, "d", None).await;
+    let app = router(state.clone());
+    let (status, body) = post(&app, "/api/plugins/d/poll", None).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body, json!({"polled": "d"}));
+    polled_at(&state, "d", Some(first)).await;
+    scheduler.abort();
+}
+
+#[tokio::test]
+async fn poll_now_for_an_unknown_plugin_is_404() {
+    let (state, scheduler) = running_hub(SLOW);
+    let (status, body) = post(&router(state), "/api/plugins/nope/poll", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body["error"].as_str().unwrap().contains("nope"));
+    scheduler.abort();
 }

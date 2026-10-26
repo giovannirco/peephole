@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
+use peephole_core::scheduler::PollTriggers;
 use peephole_core::{Config, Event, Page, Registry, Store};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -20,14 +21,16 @@ pub struct Hub {
     pub demo: bool,
     pub firmware_dir: Option<PathBuf>,
     pub public_url: Option<String>,
+    pub polls: PollTriggers,
 }
 
 impl Hub {
-    pub fn new(settings: &Settings, cfg: Config, store: Store, registry: Registry) -> AppState {
+    pub fn new(settings: &Settings, cfg: Config, store: Store, registry: Registry, polls: PollTriggers) -> AppState {
         Arc::new(Self {
             cfg,
             store,
             registry,
+            polls,
             demo: settings.demo,
             firmware_dir: settings.firmware_dir.clone(),
             public_url: settings.public_url.clone(),
@@ -110,7 +113,7 @@ mod tests {
 
     #[test]
     fn page_lookup_by_name_and_index() {
-        let hub = Hub::new(&settings(), config(), Store::new(), Registry::new(0));
+        let hub = Hub::new(&settings(), config(), Store::new(), Registry::new(0), PollTriggers::default());
         assert_eq!(hub.page_names(), vec!["a", "b"]);
         assert_eq!(hub.page_index("b"), Some(1));
         assert_eq!(hub.page_index("zz"), None);
@@ -123,7 +126,7 @@ mod tests {
         let store = Store::new();
         store.set("d/_ok", Value::Number(0.0));
         store.set("clock/_ok", Value::Number(1.0));
-        let hub = Hub::new(&settings(), config(), store, Registry::new(0));
+        let hub = Hub::new(&settings(), config(), store, Registry::new(0), PollTriggers::default());
         assert_eq!(hub.sources(), vec![("clock".to_owned(), true), ("d".to_owned(), false)]);
     }
 
