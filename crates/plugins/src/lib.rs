@@ -20,10 +20,11 @@ mod partial;
 mod period;
 pub mod prometheus;
 pub mod unifi_protect;
+pub mod waha;
 
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "cliproxyapi", "home_assistant"]
+    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "cliproxyapi", "home_assistant", "waha"]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
@@ -38,6 +39,7 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "unifi_protect" => make(entry, unifi_protect::UnifiProtect::new),
         "cliproxyapi" => make(entry, cliproxyapi::Cliproxyapi::new),
         "home_assistant" => make(entry, home_assistant::HomeAssistant::new),
+        "waha" => make(entry, waha::Waha::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
 }
@@ -77,6 +79,7 @@ mod tests {
             "{kind: unifi_protect, url: 'https://nvr.example.invalid', api_key: k, event_page: Door}",
             "{kind: cliproxyapi, url: 'http://cpa.example.invalid:8317', management_key: k}",
             "{kind: home_assistant, url: 'http://ha.example.invalid:8123', token: t}",
+            "{kind: waha, servers: [{name: a, url: 'http://w.example.invalid', api_key: k}]}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
             assert_eq!(build(&entry(yaml)).unwrap().name(), *kind);
