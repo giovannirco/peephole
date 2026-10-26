@@ -2,7 +2,7 @@
 
 **A tiny window into your homelab.** Peephole renders dashboard pages for small ESP32 screens: a Rust hub polls your sources through plugins, draws every page as a frame, and the boards show the frames. The same frames appear in your browser, and the hub's flash page programs new boards over USB from the browser.
 
-> Status: v0.1, built in a day for one board (LilyGo T-Display-S3, 320×170). It works; expect sharp edges.
+> Status: v0.1, built in a day for one board (LilyGo T-Display-S3, 320×170). It works; expect sharp edges. v0.2 adds a settings panel, per-device page lists and an optional API token.
 
 ![demo pages](docs/screenshots/demo.png)
 
@@ -55,7 +55,25 @@ Values live in a store under `plugin/key[/label]`; widgets bind to keys. Widgets
 | `PEEPHOLE_STATE` | JSON file that remembers devices across restarts |
 | `PEEPHOLE_FIRMWARE_DIR` | directory of `<board>-<version>.factory.bin` files for the flash page |
 | `PEEPHOLE_PUBLIC_URL` | the URL boards should use, shown on the flash page |
+| `PEEPHOLE_API_TOKEN` | when set, every `POST` needs `Authorization: Bearer <token>` (401 otherwise); reads stay open |
 | `RUST_LOG` | `info` |
+
+### Settings panel
+
+`/settings` shows how the hub is configured: the hub fields and which variable sets each, which `PEEPHOLE_*` variables are set (never their values), and per plugin its interval, last poll, value count, error and settings as written. A `${VAR}` reads `env VAR · set`; values under keys that look secret (`key`, `token`, `password`, `auth`, `headers`, …) read `••••`; URLs lose their userinfo. Edit the YAML or the environment and restart to change any of that; the panel only edits devices: name, cycle, page and **page list** (the pages a board steps and cycles through, in order; none ticked = every page; a plugin event can still show any page). "Poll now" polls a plugin at once.
+
+### HTTP
+
+| Route | |
+|---|---|
+| `GET /frame.png?id&w&h`, `GET /pages/{name}.png?w&h` | frames |
+| `GET /api/pages`, `/api/devices`, `/api/devices/{id}`, `/api/values`, `/api/config` | read |
+| `GET /api/plugins` | per plugin: `name`, `kind`, `interval_s`, `ok`, `error`, `polled_at`, `age_s`, `values` |
+| `GET /api/settings` | `hub`, `plugins` (with redacted `settings`), `devices`, `pages` |
+| `POST /api/devices/{id}/next`, `prev`, `page {name}`, `message {text}`, `name {name}`, `cycle {cycle_s}` | device actions |
+| `POST /api/devices/{id}/pages {"pages": ["a", "b"]}` | page list (`[]` = every page; 400 on unknown names) |
+| `POST /api/plugins/{name}/poll` | poll now: 202 `{"polled": name}`, 404 if unknown |
+| `GET /settings`, `/flash/`, `/healthz` | settings panel, flash page, liveness |
 
 ## Plugins
 
