@@ -2,7 +2,7 @@
 //! category, and a speed history. Never a torrent name, path, hash or tracker.
 //!
 //! Endpoints: `POST /api/v2/auth/login` (form `username`, `password`, with `Referer`
-//! and `Origin` set to the configured URL; success sets the `SID` cookie, a refusal is
+//! and `Origin` set to the configured URL; success sets the session cookie (`SID`, or `QBT_SID_<port>` when the WebUI runs on a custom port) and may answer 204 through a proxy; a refusal is
 //! HTTP 401 on current releases or a 200 `Fails.` without a cookie on 4.x/5.0),
 //! `GET /api/v2/app/version` (plain text), `GET /api/v2/transfer/info`,
 //! `GET /api/v2/torrents/info`, `GET /api/v2/sync/maindata?rid=0` (`server_state`).
@@ -206,9 +206,11 @@ impl Server {
             .get_all(SET_COOKIE)
             .iter()
             .filter_map(|v| v.to_str().ok())
-            .find_map(|cookie| cookie.split(';').next()?.trim().strip_prefix("SID=").map(str::to_owned))
+            .filter_map(|cookie| cookie.split(';').next().map(str::trim))
+            .find(|pair| pair.split('=').next().is_some_and(|name| name.contains("SID")))
+            .map(str::to_owned)
             .ok_or_else(|| {
-                anyhow::anyhow!("POST /api/v2/auth/login: refused (no SID cookie; check username and password)")
+                anyhow::anyhow!("POST /api/v2/auth/login: refused (no session cookie; check username and password)")
             })
     }
 
@@ -226,7 +228,7 @@ impl Server {
     }
 
     async fn send(&self, url: &reqwest::Url, sid: &str) -> anyhow::Result<reqwest::Response> {
-        let mut cookie = HeaderValue::from_str(&format!("SID={sid}")).context("invalid SID cookie")?;
+        let mut cookie = HeaderValue::from_str(sid).context("invalid session cookie")?;
         cookie.set_sensitive(true);
         let response = self.client.get(url.clone()).header(COOKIE, cookie).send().await;
         response.with_context(|| format!("GET {}", url.path()))
@@ -619,6 +621,27 @@ mod tests {
         let got = poll(&plugin(&[("nas", &server)], PASSWORD, "")).await;
         assert_eq!(got["nas/torrents"], Value::Number(7.0));
         assert_eq!(got["_requests_failed"], Value::Number(0.0));
+    }
+
+    #[tokio::test]
+    async fn login_accepts_a_renamed_session_cookie_and_an_empty_2xx() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/auth/login"))
+            .respond_with(
+                ResponseTemplate::new(204).insert_header("set-cookie", "QBT_SID_8180=abc123; HttpOnly; path=/"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/app/version"))
+            .and(header("cookie", "QBT_SID_8180=abc123"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("v5.1.2"))
+            .mount(&server)
+            .await;
+        let p = plugin(&[("arr", &server)], "pw", "");
+        let got = p.poll().await.unwrap().into_iter().collect::<BTreeMap<_, _>>();
+        assert_eq!(got.get("arr/version"), Some(&Value::Text("v5.1.2".into())));
     }
 
     #[tokio::test]
