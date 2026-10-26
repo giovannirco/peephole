@@ -1,8 +1,9 @@
 //! WAHA (WhatsApp HTTP API), verified against the source at
-//! <https://github.com/devlikeapro/waha> (`src/api/server.controller.ts`,
-//! `src/api/sessions.controller.ts`, `src/structures/server.dto.ts`, `environment.dto.ts`,
-//! `sessions.dto.ts`, `enums.dto.ts`, `src/core/manager.core.ts`) and the docs at
-//! <https://waha.devlikeapro.com/docs/>. Every request sends `X-Api-Key`.
+//! <https://github.com/devlikeapro/waha> commit 0858b4f0 (2026-10-14):
+//! `src/api/server.controller.ts`, `src/api/sessions.controller.ts`,
+//! `src/structures/server.dto.ts`, `environment.dto.ts`, `sessions.dto.ts`, `enums.dto.ts`,
+//! `src/core/manager.core.ts` and `src/core/auth/HeaderOrQueryApiKeyStrategy.ts`.
+//! Every request sends `X-Api-Key`.
 //!
 //! - `GET /api/server/version` → `{version, engine, tier, browser, platform, worker}`.
 //! - `GET /api/server/status` → `{startTimestamp, uptime, worker}`, both in milliseconds.
