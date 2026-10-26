@@ -13,6 +13,8 @@ pub mod demo;
 pub mod homarr;
 pub mod home_assistant;
 pub mod homepage;
+pub mod forgejo;
+pub mod github;
 mod http;
 pub mod http_json;
 mod insecure_tls;
@@ -47,6 +49,8 @@ pub fn kinds() -> &'static [&'static str] {
         "home_assistant",
         "waha",
     ]
+pub mod x;
+    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "forgejo", "github", "x"]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
@@ -68,6 +72,9 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "cliproxyapi" => make(entry, cliproxyapi::Cliproxyapi::new),
         "home_assistant" => make(entry, home_assistant::HomeAssistant::new),
         "waha" => make(entry, waha::Waha::new),
+        "forgejo" => make(entry, forgejo::Forgejo::new),
+        "github" => make(entry, github::Github::new),
+        "x" => make(entry, x::X::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
 }
@@ -114,6 +121,9 @@ mod tests {
             "{kind: cliproxyapi, url: 'http://cpa.example.invalid:8317', management_key: k}",
             "{kind: home_assistant, url: 'http://ha.example.invalid:8123', token: t}",
             "{kind: waha, servers: [{name: a, url: 'http://w.example.invalid', api_key: k}]}",
+            "{kind: forgejo, url: 'https://forgejo.example.invalid', token: t}",
+            "{kind: github, user: octo}",
+            "{kind: x, bearer_token: t, username: octo}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
             assert_eq!(build(&entry(yaml)).unwrap().name(), *kind);
