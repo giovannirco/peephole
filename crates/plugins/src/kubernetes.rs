@@ -1,3 +1,32 @@
+//! Kubernetes clusters read straight from their API servers with a read-only
+//! ServiceAccount (`docs/kubernetes-rbac.yaml`): what kube-state-metrics does
+//! not give a small screen, such as Argo CD sync and health, Flux readiness,
+//! cert-manager expiry, live metrics-server usage and recent warnings.
+//!
+//! Every poll makes these `GET`s per cluster, each an independent part:
+//! - `/version`
+//! - `/api/v1/nodes`
+//! - `/apis/metrics.k8s.io/v1beta1/nodes` (`metrics`)
+//! - `/api/v1/pods?limit=5000`, following `metadata.continue` for up to 5 pages (`pods`)
+//! - `/api/v1/persistentvolumeclaims`
+//! - `/api/v1/events?fieldSelector=type%3DWarning&limit=500` (`events`)
+//! - `/apis/argoproj.io/v1alpha1/applications` (`argocd`)
+//! - `/apis/kustomize.toolkit.fluxcd.io/v1/kustomizations` and
+//!   `/apis/helm.toolkit.fluxcd.io/v2/helmreleases` (`flux`)
+//! - `/apis/cert-manager.io/v1/certificates` (`certificates`)
+//!
+//! A group that is not installed answers 404 (or 403 without RBAC): that part
+//! fails and is counted, the rest of the poll goes on.
+//!
+//! References:
+//! - API objects: <https://kubernetes.io/docs/reference/kubernetes-api/>
+//! - In-cluster access: <https://kubernetes.io/docs/tasks/run-application/access-api-from-pod/>
+//! - Argo CD Application: <https://argo-cd.readthedocs.io/en/stable/operator-manual/application.yaml>
+//!   and its health states: <https://argo-cd.readthedocs.io/en/stable/operator-manual/health/>
+//! - Flux `Ready` conditions: <https://fluxcd.io/flux/components/kustomize/kustomizations/>,
+//!   <https://fluxcd.io/flux/components/helm/helmreleases/>
+//! - cert-manager `status.notAfter` and `Ready`: <https://cert-manager.io/docs/reference/api-docs/>
+
 use std::time::Duration;
 
 use anyhow::Context;

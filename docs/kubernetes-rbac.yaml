@@ -1,0 +1,50 @@
+# Least privilege for the `kubernetes` plugin: read-only (get, list) on exactly
+# the objects it reads, and nothing else. No secrets, no watch, no writes.
+# Apply in every cluster the plugin reads; replace the `peephole` namespace
+# with the one the hub (or the token's ServiceAccount) lives in.
+# Groups that are not installed (Argo CD, Flux, cert-manager, metrics-server)
+# can stay in the role: their rules simply match nothing.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: peephole
+  namespace: peephole
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: peephole-reader
+rules:
+  - apiGroups: [""]
+    resources: [nodes, pods, namespaces, persistentvolumeclaims, events]
+    verbs: [get, list]
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes, pods]
+    verbs: [get, list]
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [get, list]
+  - apiGroups: [kustomize.toolkit.fluxcd.io]
+    resources: [kustomizations]
+    verbs: [get, list]
+  - apiGroups: [helm.toolkit.fluxcd.io]
+    resources: [helmreleases]
+    verbs: [get, list]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates]
+    verbs: [get, list]
+  - nonResourceURLs: [/version]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: peephole-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: peephole-reader
+subjects:
+  - kind: ServiceAccount
+    name: peephole
+    namespace: peephole
