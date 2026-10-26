@@ -9,7 +9,7 @@ static MEDIUM: LazyLock<fontdue::Font> = LazyLock::new(|| load(include_bytes!(".
 static BOLD: LazyLock<fontdue::Font> = LazyLock::new(|| load(include_bytes!("../fonts/Roboto-Bold.ttf")));
 
 type Glyph = Arc<(Metrics, Vec<u8>)>;
-type GlyphCache = Mutex<HashMap<(Font, char), Glyph>>;
+type GlyphCache = Mutex<HashMap<(Font, u32, char), Glyph>>;
 static GLYPHS: LazyLock<GlyphCache> = LazyLock::new(Default::default);
 
 fn load(bytes: &'static [u8]) -> fontdue::Font {
@@ -96,9 +96,12 @@ pub struct Style {
     pub align: Align,
 }
 
-fn glyph(font: Font, ch: char) -> Glyph {
+fn glyph(font: Font, scale: f32, ch: char) -> Glyph {
     let mut cache = GLYPHS.lock().expect("glyph cache poisoned");
-    cache.entry((font, ch)).or_insert_with(|| Arc::new(font.face().rasterize(ch, font.px()))).clone()
+    cache
+        .entry((font, scale.to_bits(), ch))
+        .or_insert_with(|| Arc::new(font.face().rasterize(ch, font.px() * scale)))
+        .clone()
 }
 
 fn advance(font: Font, s: &str) -> f32 {
@@ -109,13 +112,13 @@ fn advance(font: Font, s: &str) -> f32 {
         if let Some(p) = prev {
             pen += face.horizontal_kern(p, ch, font.px()).unwrap_or(0.0);
         }
-        pen += glyph(font, ch).0.advance_width;
+        pen += glyph(font, 1.0, ch).0.advance_width;
         prev = Some(ch);
     }
     pen
 }
 
-/// Width of `s` in px at `font`.
+/// Width of `s` in design-space px at `font`, whatever scale it is drawn at.
 pub fn text_width(font: Font, s: &str) -> i32 {
     advance(font, s).ceil() as i32
 }
@@ -142,8 +145,10 @@ pub fn wrap(font: Font, s: &str, max_w: i32) -> Vec<String> {
 }
 
 /// Draw `s` with its line box top at `y`; `x` is the left, centre or right edge per `style.align`.
-/// Pixels outside `clip` (when given) are left untouched. The pixmap must be opaque.
-pub fn draw_text(pm: &mut Pixmap, x: i32, y: i32, style: &Style, s: &str, clip: Option<IntRect>) {
+/// `x`, `y` and `clip` are in design space; glyphs are rasterized at `scale` times the font size
+/// and placed at `scale` times their design position. Pixels outside `clip` (when given) are left
+/// untouched. The pixmap must be opaque.
+pub fn draw_text(pm: &mut Pixmap, x: i32, y: i32, style: &Style, s: &str, clip: Option<IntRect>, scale: f32) {
     let font = style.font;
     let width = advance(font, s);
     let left = match style.align {
@@ -151,21 +156,24 @@ pub fn draw_text(pm: &mut Pixmap, x: i32, y: i32, style: &Style, s: &str, clip: 
         Align::Center => x as f32 - width / 2.0,
         Align::Right => x as f32 - width,
     };
-    let baseline = y as f32 + font.ascent();
+    let px_size = font.px() * scale;
     let face = font.face();
+    let ascent = face.horizontal_line_metrics(px_size).expect("Roboto has horizontal metrics").ascent;
+    let baseline = y as f32 * scale + ascent;
     let (pw, ph) = (pm.width() as i32, pm.height() as i32);
+    let at = |v: i32| (v as f32 * scale).round() as i32;
     let (cx0, cy0, cx1, cy1) = match clip {
-        Some(c) => (c.left().max(0), c.top().max(0), c.right().min(pw), c.bottom().min(ph)),
+        Some(c) => (at(c.left()).max(0), at(c.top()).max(0), at(c.right()).min(pw), at(c.bottom()).min(ph)),
         None => (0, 0, pw, ph),
     };
     let data = pm.data_mut();
-    let mut pen = left;
+    let mut pen = left * scale;
     let mut prev = None;
     for ch in s.chars() {
         if let Some(p) = prev {
-            pen += face.horizontal_kern(p, ch, font.px()).unwrap_or(0.0);
+            pen += face.horizontal_kern(p, ch, px_size).unwrap_or(0.0);
         }
-        let g = glyph(font, ch);
+        let g = glyph(font, scale, ch);
         let (m, bitmap) = (&g.0, &g.1);
         let gx = (pen + m.xmin as f32).round() as i32;
         let gy = (baseline - (m.height as i32 + m.ymin) as f32).round() as i32;
@@ -244,7 +252,7 @@ mod tests {
     fn draws_anti_aliased_text_inside_its_box() {
         let mut pm = canvas(120, 40);
         let style = Style { font: Font::Mid, color: TEXT, align: Align::Left };
-        draw_text(&mut pm, 10, 5, &style, "Hello", None);
+        draw_text(&mut pm, 10, 5, &style, "Hello", None, 1.0);
         assert!(lit(&pm, 10, 120) > 30);
         assert_eq!(lit(&pm, 0, 10), 0);
         let partial = pm.pixels().iter().filter(|p| p.red() > BG.red() + 10 && p.red() < TEXT.red() - 30).count();
@@ -255,11 +263,11 @@ mod tests {
     #[test]
     fn right_and_centre_alignment_anchor_at_x() {
         let mut pm = canvas(120, 30);
-        draw_text(&mut pm, 110, 5, &Style { font: Font::Mid, color: TEXT, align: Align::Right }, "88", None);
+        draw_text(&mut pm, 110, 5, &Style { font: Font::Mid, color: TEXT, align: Align::Right }, "88", None, 1.0);
         assert_eq!(lit(&pm, 111, 120), 0);
         assert!(lit(&pm, 90, 111) > 10);
         let mut pm = canvas(120, 30);
-        draw_text(&mut pm, 60, 5, &Style { font: Font::Mid, color: TEXT, align: Align::Center }, "8888", None);
+        draw_text(&mut pm, 60, 5, &Style { font: Font::Mid, color: TEXT, align: Align::Center }, "8888", None, 1.0);
         assert!(lit(&pm, 40, 60) > 5 && lit(&pm, 60, 80) > 5);
     }
 
@@ -267,7 +275,7 @@ mod tests {
     fn clip_rect_limits_the_drawn_pixels() {
         let mut pm = canvas(120, 30);
         let clip = IntRect::from_xywh(20, 0, 30, 30);
-        draw_text(&mut pm, 0, 5, &Style { font: Font::Mid, color: TEXT, align: Align::Left }, "WWWWWWWWWW", clip);
+        draw_text(&mut pm, 0, 5, &Style { font: Font::Mid, color: TEXT, align: Align::Left }, "WWWWWWWWWW", clip, 1.0);
         assert_eq!(lit(&pm, 0, 20), 0);
         assert_eq!(lit(&pm, 50, 120), 0);
         assert!(lit(&pm, 20, 50) > 10);
@@ -276,7 +284,7 @@ mod tests {
     #[test]
     fn text_top_is_at_y() {
         let mut pm = canvas(60, 60);
-        draw_text(&mut pm, 2, 20, &Style { font: Font::Small, color: TEXT, align: Align::Left }, "Hg", None);
+        draw_text(&mut pm, 2, 20, &Style { font: Font::Small, color: TEXT, align: Align::Left }, "Hg", None, 1.0);
         let rows: Vec<u32> = pm
             .pixels()
             .iter()
@@ -304,7 +312,59 @@ mod tests {
     fn colour_is_kept() {
         let mut pm = canvas(60, 30);
         let c = ColorU8::from_rgba(255, 0, 0, 255);
-        draw_text(&mut pm, 2, 2, &Style { font: Font::Num, color: c, align: Align::Left }, "8", None);
+        draw_text(&mut pm, 2, 2, &Style { font: Font::Num, color: c, align: Align::Left }, "8", None, 1.0);
         assert!(pm.pixels().iter().any(|p| p.red() == 255 && p.green() == 0));
+    }
+
+    #[test]
+    fn glyph_cache_keeps_sizes_apart() {
+        let one = glyph(Font::Mid, 1.0, 'M');
+        let two = glyph(Font::Mid, 2.0, 'M');
+        assert!(two.0.height > one.0.height, "{} vs {}", two.0.height, one.0.height);
+        assert!(two.0.advance_width > one.0.advance_width * 1.9);
+    }
+
+    fn lit_span(pm: &Pixmap) -> (u32, u32, u32) {
+        let w = pm.width();
+        let lit: Vec<(u32, u32)> = pm
+            .pixels()
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.red() > BG.red() + 40)
+            .map(|(i, _)| (i as u32 % w, i as u32 / w))
+            .collect();
+        let left = lit.iter().map(|p| p.0).min().unwrap();
+        let right = lit.iter().map(|p| p.0).max().unwrap();
+        let top = lit.iter().map(|p| p.1).min().unwrap();
+        (left, right, top)
+    }
+
+    #[test]
+    fn scaled_text_keeps_the_design_layout() {
+        let before = text_width(Font::Mid, "Hello");
+        let mut one = canvas(120, 40);
+        let style = Style { font: Font::Mid, color: TEXT, align: Align::Left };
+        draw_text(&mut one, 10, 5, &style, "Hello", None, 1.0);
+        let mut two = canvas(240, 80);
+        draw_text(&mut two, 10, 5, &style, "Hello", None, 2.0);
+        assert_eq!(text_width(Font::Mid, "Hello"), before, "measurement stays in design space");
+        let (l1, r1, t1) = lit_span(&one);
+        let (l2, r2, t2) = lit_span(&two);
+        assert!((l2 as i32 - 2 * l1 as i32).abs() <= 2, "left {l2} vs 2 x {l1}");
+        assert!((r2 as i32 - 2 * r1 as i32).abs() <= 3, "right {r2} vs 2 x {r1}");
+        assert!((t2 as i32 - 2 * t1 as i32).abs() <= 2, "top {t2} vs 2 x {t1}");
+        let mut right = canvas(240, 80);
+        draw_text(&mut right, 110, 5, &Style { align: Align::Right, ..style }, "Hello", None, 2.0);
+        assert!((lit_span(&right).1 as i32 - 220).abs() <= 3, "right-aligned at 2 x 110");
+    }
+
+    #[test]
+    fn clip_rect_scales_with_the_text() {
+        let mut pm = canvas(240, 60);
+        let clip = IntRect::from_xywh(20, 0, 30, 30);
+        draw_text(&mut pm, 0, 5, &Style { font: Font::Mid, color: TEXT, align: Align::Left }, "WWWWWWWWWW", clip, 2.0);
+        assert_eq!(lit(&pm, 0, 40), 0);
+        assert_eq!(lit(&pm, 100, 240), 0);
+        assert!(lit(&pm, 40, 100) > 40);
     }
 }

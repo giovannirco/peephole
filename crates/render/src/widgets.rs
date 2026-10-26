@@ -45,7 +45,7 @@ impl Painter<'_> {
     fn header(&mut self, page: &Page) {
         let title = page.title.as_deref().unwrap_or(&page.name);
         self.cv.text(6, 1, Font::Mid, TEXT2, Align::Left, title);
-        let w = self.cv.pixmap.width() as i32;
+        let w = self.cv.width();
         let index = format!("{}/{}", self.ctx.page_index + 1, self.ctx.page_count);
         self.cv.text(w - 4, 3, Font::Small, MUTED, Align::Right, &index);
         let mut x = w - 4 - text_width(Font::Small, &index) - 8;
@@ -369,12 +369,12 @@ impl Painter<'_> {
             let src = image::RgbaImage::from_raw(img.width, img.height, img.rgba.to_vec())?;
             let scale = (b.w as f64 / img.width as f64).min(b.h as f64 / img.height as f64);
             let (dw, dh) = (
-                ((img.width as f64 * scale).round() as u32).max(1),
-                ((img.height as f64 * scale).round() as u32).max(1),
+                ((img.width as f64 * scale).round() as i32).max(1),
+                ((img.height as f64 * scale).round() as i32).max(1),
             );
-            Some(image::imageops::resize(&src, dw, dh, image::imageops::FilterType::Triangle))
+            Some((src, dw, dh))
         });
-        let Some(pic) = fitted else {
+        let Some((src, dw, dh)) = fitted else {
             self.outline(b);
             self.cv.text(
                 b.x + b.w / 2,
@@ -386,9 +386,8 @@ impl Painter<'_> {
             );
             return;
         };
-        let (dw, dh) = (pic.width() as i32, pic.height() as i32);
         let (dx, dy) = (b.x + (b.w - dw) / 2, b.y + (b.h - dh) / 2);
-        self.cv.blit(dx, dy, &pic);
+        self.cv.blit(dx, dy, dw, dh, &src);
         self.outline(Boxed { x: dx, y: dy, w: dw, h: dh });
         if let Some(l) = label {
             self.cv.text(dx + 3, dy + 2, Font::Small, TEXT2, Align::Left, l);
@@ -822,5 +821,23 @@ mod tests {
         };
         assert!(bright(16, 80) > 20, "title text");
         assert_eq!(bright(14, 16), 0);
+    }
+
+    #[test]
+    fn header_uses_the_design_width_on_a_scaled_canvas() {
+        let mut p = page(vec![]);
+        p.header = true;
+        p.cards[0].y = 22;
+        p.cards[0].h = 148;
+        let mut c = ctx();
+        c.sources = vec![("a".into(), true), ("b".into(), false)];
+        let store = Store::new();
+        let mut cv = crate::canvas::Canvas::new_scaled(640, 340, 2.0);
+        let look = crate::values::Lookup { store: &store, now: c.now, stale_secs: c.stale_secs };
+        super::Painter { cv: &mut cv, look, ctx: &c }.page(&p);
+        let f = Frame { width: 640, height: 340, rgba: cv.pixmap.take() };
+        assert!(count(&f, OK, 480, 0, 640, 36) > 12, "source dots near the right edge");
+        assert!(count(&f, BAD, 480, 0, 640, 36) > 12);
+        assert_eq!(px(&f, 320, 36), rgb(EDGE));
     }
 }
