@@ -6,7 +6,9 @@
 //! "mainChartData": {"datasets": [{"label", "data"}]}, "topClients": [{"name", "domain", "hits",
 //! "rateLimited"}], "topDomains": [{"name", "hits"}], "topBlockedDomains": [{"name", "hits"}]}}`;
 //! any other `status` (`error`, `invalid-token`, `2fa-required`) is a failure, with `errorMessage`
-//! present for `error`. The token rides in the query string, so no error or log carries the URL.
+//! present for `error`. APIDOCS names `Authorization: Bearer <token>` as the primary form since
+//! v15.0 and keeps the `token` query parameter for backward compatibility; this plugin uses the
+//! query parameter, which every version accepts, so no error or log carries the URL.
 
 use std::time::Duration;
 
