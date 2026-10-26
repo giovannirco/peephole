@@ -19,6 +19,7 @@ mod http;
 pub mod http_json;
 mod insecure_tls;
 mod key;
+pub mod kubernetes;
 pub mod mempool;
 mod partial;
 mod period;
@@ -32,25 +33,9 @@ pub mod waha;
 
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
-    &[
-        "clock",
-        "demo",
-        "prometheus",
-        "http_json",
-        "mempool",
-        "unifi_protect",
-        "proxmox",
-        "technitium",
-        "homepage",
-        "homarr",
-        "uptime_kuma",
-        "unifi_network",
-        "cliproxyapi",
-        "home_assistant",
-        "waha",
-    ]
+    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "proxmox", "technitium", "homepage", "homarr", "uptime_kuma", "unifi_network", "cliproxyapi", "home_assistant", "waha", ]
 pub mod x;
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "forgejo", "github", "x"]
+    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "forgejo", "github", "x", "kubernetes"]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
@@ -75,6 +60,7 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "forgejo" => make(entry, forgejo::Forgejo::new),
         "github" => make(entry, github::Github::new),
         "x" => make(entry, x::X::new),
+        "kubernetes" => make(entry, kubernetes::Kubernetes::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
 }
@@ -124,6 +110,7 @@ mod tests {
             "{kind: forgejo, url: 'https://forgejo.example.invalid', token: t}",
             "{kind: github, user: octo}",
             "{kind: x, bearer_token: t, username: octo}",
+            "{kind: kubernetes, clusters: [{name: a, url: 'https://k8s.example.invalid:6443', token: t, insecure: true}]}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
             assert_eq!(build(&entry(yaml)).unwrap().name(), *kind);
