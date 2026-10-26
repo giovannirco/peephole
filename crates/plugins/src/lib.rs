@@ -10,6 +10,7 @@ use peephole_core::config::PluginEntry;
 pub mod clock;
 pub mod demo;
 pub mod forgejo;
+pub mod github;
 mod http;
 pub mod http_json;
 mod insecure_tls;
@@ -22,7 +23,7 @@ pub mod unifi_protect;
 
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "forgejo"]
+    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "forgejo", "github"]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
@@ -36,6 +37,7 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "mempool" => make(entry, mempool::Mempool::new),
         "unifi_protect" => make(entry, unifi_protect::UnifiProtect::new),
         "forgejo" => make(entry, forgejo::Forgejo::new),
+        "github" => make(entry, github::Github::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
 }
@@ -74,6 +76,7 @@ mod tests {
             "{kind: mempool, url: 'https://mempool.example.invalid'}",
             "{kind: unifi_protect, url: 'https://nvr.example.invalid', api_key: k, event_page: Door}",
             "{kind: forgejo, url: 'https://forgejo.example.invalid', token: t}",
+            "{kind: github, user: octo}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
             assert_eq!(build(&entry(yaml)).unwrap().name(), *kind);
