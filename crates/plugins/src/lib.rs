@@ -7,10 +7,12 @@ use anyhow::Context;
 use peephole_core::Plugin;
 use peephole_core::config::PluginEntry;
 
+pub mod cliproxyapi;
 pub mod clock;
 pub mod demo;
 pub mod homarr;
 pub mod homepage;
+pub mod home_assistant;
 mod http;
 pub mod http_json;
 mod insecure_tls;
@@ -28,6 +30,8 @@ pub mod uptime_kuma;
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
     &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "proxmox", "technitium", "homepage", "homarr", "uptime_kuma", "unifi_network"]
+pub mod waha;
+    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "cliproxyapi", "home_assistant", "waha"]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
@@ -46,6 +50,9 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "homarr" => make(entry, homarr::Homarr::new),
         "uptime_kuma" => make(entry, uptime_kuma::UptimeKuma::new),
         "unifi_network" => make(entry, unifi_network::UnifiNetwork::new),
+        "cliproxyapi" => make(entry, cliproxyapi::Cliproxyapi::new),
+        "home_assistant" => make(entry, home_assistant::HomeAssistant::new),
+        "waha" => make(entry, waha::Waha::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
 }
@@ -89,6 +96,9 @@ mod tests {
             "{kind: homarr, url: 'https://homarr.example.invalid', api_key: k}",
             "{kind: uptime_kuma, url: 'https://kuma.example.invalid', api_key: k}",
             "{kind: unifi_network, url: 'https://unifi.example.invalid', username: u, password: p}",
+            "{kind: cliproxyapi, url: 'http://cpa.example.invalid:8317', management_key: k}",
+            "{kind: home_assistant, url: 'http://ha.example.invalid:8123', token: t}",
+            "{kind: waha, servers: [{name: a, url: 'http://w.example.invalid', api_key: k}]}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
             assert_eq!(build(&entry(yaml)).unwrap().name(), *kind);
