@@ -21,22 +21,13 @@ mod period;
 pub mod prometheus;
 pub mod proxmox;
 pub mod technitium;
+pub mod unifi_network;
 pub mod unifi_protect;
+pub mod uptime_kuma;
 
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
-    &[
-        "clock",
-        "demo",
-        "prometheus",
-        "http_json",
-        "mempool",
-        "unifi_protect",
-        "proxmox",
-        "technitium",
-        "homepage",
-        "homarr",
-    ]
+    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "proxmox", "technitium", "homepage", "homarr", "uptime_kuma", "unifi_network"]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
@@ -53,6 +44,8 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "technitium" => make(entry, technitium::Technitium::new),
         "homepage" => make(entry, homepage::Homepage::new),
         "homarr" => make(entry, homarr::Homarr::new),
+        "uptime_kuma" => make(entry, uptime_kuma::UptimeKuma::new),
+        "unifi_network" => make(entry, unifi_network::UnifiNetwork::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
 }
@@ -94,6 +87,8 @@ mod tests {
             "{kind: technitium, url: 'http://dns.example.invalid:5380', token: t}",
             "{kind: homepage, url: 'https://home.example.invalid'}",
             "{kind: homarr, url: 'https://homarr.example.invalid', api_key: k}",
+            "{kind: uptime_kuma, url: 'https://kuma.example.invalid', api_key: k}",
+            "{kind: unifi_network, url: 'https://unifi.example.invalid', username: u, password: p}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
             assert_eq!(build(&entry(yaml)).unwrap().name(), *kind);

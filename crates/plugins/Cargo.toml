@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Peephole plugins: clock, demo, prometheus, http-json, mempool, unifi-protect"
+description = "Peephole plugins: clock, demo, prometheus, http-json, mempool, unifi-protect, uptime-kuma, unifi-network"
 
 [dependencies]
 peephole-core = { path = "../core" }
