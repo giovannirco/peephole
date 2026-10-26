@@ -508,7 +508,7 @@ pages:
           {kind: ticker, x: 8, y: 44, w: 292, bind: k8s/cluster-a/last_warning, color: text2}]}
 
   - name: fleet
-    title: Kubernetes · six clusters
+    title: Kubernetes · fleet
     cards:
       - {x: 6, y: 24, w: 308, h: 140, accent: web, widgets: [
           {kind: text, x: 100, y: 2, text: nodes, font: small, color: text2},
