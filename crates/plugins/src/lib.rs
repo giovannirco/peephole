@@ -17,12 +17,13 @@ pub mod mempool;
 mod partial;
 mod period;
 pub mod prometheus;
+pub mod proxmox;
 pub mod technitium;
 pub mod unifi_protect;
 
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "technitium"]
+    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "proxmox", "technitium"]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
@@ -35,6 +36,7 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "prometheus" => make(entry, prometheus::Prometheus::new),
         "mempool" => make(entry, mempool::Mempool::new),
         "unifi_protect" => make(entry, unifi_protect::UnifiProtect::new),
+        "proxmox" => make(entry, proxmox::Proxmox::new),
         "technitium" => make(entry, technitium::Technitium::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
@@ -73,6 +75,7 @@ mod tests {
             "{kind: http_json, url: 'http://api.example.invalid', fields: []}",
             "{kind: mempool, url: 'https://mempool.example.invalid'}",
             "{kind: unifi_protect, url: 'https://nvr.example.invalid', api_key: k, event_page: Door}",
+            "{kind: proxmox, hosts: [{name: a, url: 'https://pve-a.example.invalid:8006', token_id: 'u@pve!t', token_secret: s}]}",
             "{kind: technitium, url: 'http://dns.example.invalid:5380', token: t}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
