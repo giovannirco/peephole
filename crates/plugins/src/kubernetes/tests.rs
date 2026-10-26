@@ -483,4 +483,248 @@ mod poll {
         assert_eq!(n("_requests_ok"), 10.0);
         assert_eq!(n("_requests_failed"), 0.0);
     }
+
+    #[tokio::test]
+    async fn a_missing_metrics_server_is_a_soft_failure() {
+        let server = api_server(TOKEN, &["/apis/metrics.k8s.io/v1beta1/nodes"]).await;
+        let got = poll(&format!("clusters: [{}]", remote("home", &server, TOKEN))).await;
+        assert_eq!(got["home/nodes_total"], Value::Number(2.0));
+        assert_eq!(got["home/argo_apps"], Value::Number(3.0));
+        assert!(!got.contains_key("home/cpu") && !got.contains_key("home/node/cp1/cpu"));
+        assert_eq!(got["_requests_ok"], Value::Number(9.0));
+        assert_eq!(got["_requests_failed"], Value::Number(1.0));
+    }
+
+    #[tokio::test]
+    async fn missing_argo_flux_and_cert_manager_groups_are_soft_failures() {
+        let skip = [
+            "/apis/argoproj.io/v1alpha1/applications",
+            "/apis/kustomize.toolkit.fluxcd.io/v1/kustomizations",
+            "/apis/cert-manager.io/v1/certificates",
+        ];
+        let server = api_server(TOKEN, &skip).await;
+        let got = poll(&format!("clusters: [{}]", remote("home", &server, TOKEN))).await;
+        assert_eq!(got["home/pods_total"], Value::Number(4.0));
+        assert!(!got.keys().any(|k| k.starts_with("home/argo") || k.starts_with("home/cert")));
+        assert_eq!(got["home/flux_total"], Value::Number(1.0));
+        assert_eq!(got["home/flux_worst"], Value::Text("helmrelease/media/jellyfin: InstallFailed".into()));
+        assert!(!got.contains_key("home/flux/kustomization/apps/ready"));
+        assert_eq!(got["_requests_failed"], Value::Number(3.0));
+    }
+
+    #[tokio::test]
+    async fn reads_several_clusters_and_counts_the_ones_that_answer() {
+        let home = api_server(TOKEN, &[]).await;
+        let lab = api_server("lab-token-not-real", &[]).await;
+        let down = MockServer::start().await;
+        let yaml = format!(
+            "clusters: [{}, {}, {}]",
+            remote("home", &home, TOKEN),
+            remote("lab", &lab, "lab-token-not-real"),
+            remote("down", &down, "down-token")
+        );
+        let got = poll(&yaml).await;
+        assert_eq!(got["home/nodes_total"], Value::Number(2.0));
+        assert_eq!(got["lab/nodes_total"], Value::Number(2.0));
+        assert_eq!(got["lab/version"], Value::Text("v1.37.1".into()));
+        assert!(!got.keys().any(|k| k.starts_with("down/")));
+        assert_eq!(got["clusters_total"], Value::Number(3.0));
+        assert_eq!(got["clusters_ok"], Value::Number(2.0));
+        assert_eq!(got["_requests_ok"], Value::Number(20.0));
+        assert_eq!(got["_requests_failed"], Value::Number(10.0));
+    }
+
+    #[tokio::test]
+    async fn every_cluster_failing_is_an_error_that_never_shows_the_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
+        let k = build(&format!("clusters: [{}]", remote("home", &server, TOKEN))).unwrap();
+        let err = format!("{:#}", k.poll_at(now()).await.unwrap_err());
+        assert!(err.contains("home /api/v1/nodes") && err.contains("401"), "{err}");
+        assert!(!err.contains(TOKEN), "{err}");
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 10);
+        assert!(requests.iter().all(|r| r.headers["authorization"] == format!("Bearer {TOKEN}").as_str()));
+    }
+
+    #[tokio::test]
+    async fn disabled_endpoints_are_not_requested() {
+        let server = api_server(TOKEN, &[]).await;
+        let yaml = format!(
+            "{{argocd: false, flux: false, certificates: false, metrics: false, events: false, pods: false, clusters: [{}]}}",
+            remote("home", &server, TOKEN)
+        );
+        let got = poll(&yaml).await;
+        let paths: Vec<String> =
+            server.received_requests().await.unwrap().iter().map(|r| r.url.path().to_owned()).collect();
+        assert_eq!(paths.len(), 3, "{paths:?}");
+        for p in ["/version", "/api/v1/nodes", "/api/v1/persistentvolumeclaims"] {
+            assert!(paths.iter().any(|seen| seen == p), "{p} not requested: {paths:?}");
+        }
+        assert!(got.contains_key("home/pvc_total") && !got.contains_key("home/pods_total"));
+        assert_eq!(got["_requests_ok"], Value::Number(3.0));
+    }
+
+    fn pod_page(names: &[&str], next: Option<&str>) -> Json {
+        let items: Vec<Json> = names
+            .iter()
+            .map(|n| json!({"metadata": meta(n, Some("default")), "status": {"phase": "Running"}}))
+            .collect();
+        let mut page = list("PodList", "v1", json!(items));
+        if let Some(token) = next {
+            page["metadata"]["continue"] = json!(token);
+            page["metadata"]["remainingItemCount"] = json!(1);
+        }
+        page
+    }
+
+    #[tokio::test]
+    async fn follows_pod_pages() {
+        use wiremock::matchers::query_param_is_missing;
+
+        let server = MockServer::start().await;
+        let auth = || header("authorization", format!("Bearer {TOKEN}"));
+        Mock::given(method("GET"))
+            .and(path("/api/v1/pods"))
+            .and(query_param("limit", "5000"))
+            .and(query_param_is_missing("continue"))
+            .and(auth())
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(pod_page(&["a", "b"], Some("eyJ2IjoibWV0YS5rOHMuaW8vdjEifQ"))),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/pods"))
+            .and(query_param("limit", "5000"))
+            .and(query_param("continue", "eyJ2IjoibWV0YS5rOHMuaW8vdjEifQ"))
+            .and(auth())
+            .respond_with(ResponseTemplate::new(200).set_body_json(pod_page(&["c"], None)))
+            .mount(&server)
+            .await;
+        let got = poll(&format!("clusters: [{}]", remote("home", &server, TOKEN))).await;
+        assert_eq!(got["home/pods_total"], Value::Number(3.0));
+        assert_eq!(got["home/pods_running"], Value::Number(3.0));
+    }
+
+    #[tokio::test]
+    async fn more_than_five_pod_pages_fails_the_pods_part_only() {
+        let server = api_server(TOKEN, &[]).await;
+        server.reset().await;
+        mount(&server, TOKEN, "/api/v1/nodes", nodes()).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/pods"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(pod_page(&["a"], Some("more"))))
+            .expect(5)
+            .mount(&server)
+            .await;
+        let k = build(&format!(
+            "{{argocd: false, flux: false, certificates: false, metrics: false, events: false, clusters: [{}]}}",
+            remote("home", &server, TOKEN)
+        ))
+        .unwrap();
+        let got: BTreeMap<_, _> = k.poll_at(now()).await.unwrap().into_iter().collect();
+        assert!(!got.contains_key("home/pods_total"));
+        assert_eq!(got["home/nodes_total"], Value::Number(2.0));
+        assert_eq!(got["_requests_failed"], Value::Number(3.0));
+    }
+}
+
+mod values_edges {
+    use chrono::{DateTime, Utc};
+    use peephole_core::Value;
+    use serde_json::json;
+
+    use super::super::{api, values};
+
+    fn now() -> DateTime<Utc> {
+        super::poll::NOW.parse().unwrap()
+    }
+
+    fn get(values: &values::Values, key: &str) -> Option<Value> {
+        values.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+    }
+
+    fn items<T: serde::de::DeserializeOwned>(raw: serde_json::Value) -> Vec<T> {
+        serde_json::from_value(raw).unwrap()
+    }
+
+    #[test]
+    fn metrics_without_the_node_list_report_raw_cores() {
+        let usage: Vec<api::NodeMetrics> =
+            items(json!([{"metadata": {"name": "cp1"}, "usage": {"cpu": "1500m", "memory": "1Gi"}}]));
+        let got = values::metrics(&usage, None).unwrap();
+        assert_eq!(get(&got, "node/cp1/cpu_cores"), Some(Value::Number(1.5)));
+        assert!(
+            get(&got, "node/cp1/cpu").is_none() && get(&got, "node/cp1/mem").is_none() && get(&got, "cpu").is_none()
+        );
+    }
+
+    #[test]
+    fn a_bad_quantity_fails_naming_the_node() {
+        let usage: Vec<api::NodeMetrics> = items(json!([{"metadata": {"name": "cp1"}, "usage": {"cpu": "lots"}}]));
+        let err = values::metrics(&usage, None).unwrap_err().to_string();
+        assert!(err.contains("cp1") && err.contains("lots"), "{err}");
+    }
+
+    #[test]
+    fn nothing_wrong_means_empty_texts() {
+        let events = values::events(&[], now());
+        assert_eq!(get(&events, "warnings_1h"), Some(Value::Number(0.0)));
+        assert_eq!(get(&events, "last_warning"), Some(Value::Text(String::new())));
+        assert!(get(&events, "last_warning_age").is_none());
+
+        let apps: Vec<api::Application> = items(
+            json!([{"metadata": {"name": "a", "namespace": "argocd"}, "status": {"sync": {"status": "Synced"}, "health": {"status": "Healthy"}}}]),
+        );
+        assert_eq!(get(&values::argo(&apps), "argo_worst"), Some(Value::Text(String::new())));
+
+        let flux: Vec<api::Reconciled> = items(
+            json!([{"metadata": {"name": "apps", "namespace": "flux-system"}, "status": {"conditions": [{"type": "Ready", "status": "True"}]}}]),
+        );
+        assert_eq!(
+            get(&values::flux_totals(&[("kustomization", &flux)]), "flux_worst"),
+            Some(Value::Text(String::new()))
+        );
+
+        let pods = values::pods(&[]);
+        assert_eq!(get(&pods, "bad_pod"), Some(Value::Text(String::new())));
+        assert!(get(&pods, "top_ns").is_none());
+    }
+
+    #[test]
+    fn an_app_that_is_healthy_but_out_of_sync_is_the_worst_one() {
+        let apps: Vec<api::Application> = items(json!([
+            {"metadata": {"name": "a"}, "status": {"sync": {"status": "Synced"}, "health": {"status": "Healthy"}}},
+            {"metadata": {"name": "b"}, "status": {"sync": {"status": "OutOfSync"}, "health": {"status": "Healthy"}}},
+            {"metadata": {"name": "c"}, "status": {"sync": {"status": "Synced"}, "health": {"status": "Missing"}}}
+        ]));
+        let got = values::argo(&apps);
+        assert_eq!(get(&got, "argo_worst"), Some(Value::Text("b: OutOfSync".into())));
+        assert_eq!(get(&got, "argo_missing"), Some(Value::Number(1.0)));
+    }
+
+    #[test]
+    fn a_flux_object_without_conditions_is_not_ready_for_an_unknown_reason() {
+        let flux: Vec<api::Reconciled> = items(json!([{"metadata": {"name": "new", "namespace": "apps"}}]));
+        let got = values::flux_totals(&[("helmrelease", &flux)]);
+        assert_eq!(get(&got, "flux_worst"), Some(Value::Text("helmrelease/apps/new: Unknown".into())));
+    }
+
+    #[test]
+    fn warning_time_uses_the_latest_of_the_three_timestamps() {
+        let events: Vec<api::Event> = items(json!([
+            {"metadata": {"name": "e1", "namespace": "kube-system"}, "involvedObject": {"kind": "Node", "name": "w1"},
+             "reason": "Rebooted", "lastTimestamp": "2026-10-25T10:00:00Z", "eventTime": null,
+             "series": {"count": 2, "lastObservedTime": "2026-10-25T11:59:00.500000Z"}},
+            {"metadata": {"name": "e2", "namespace": "default"}, "involvedObject": {"kind": "Pod", "name": "p"},
+             "reason": "Old", "lastTimestamp": null, "eventTime": null},
+            {"metadata": {"name": "e3", "namespace": "default"}, "involvedObject": {"kind": "Pod", "name": "q"},
+             "reason": "Edge", "lastTimestamp": "2026-10-25T11:00:00Z"}
+        ]));
+        let got = values::events(&events, now());
+        assert_eq!(get(&got, "warnings_1h"), Some(Value::Number(2.0)));
+        assert_eq!(get(&got, "last_warning"), Some(Value::Text("kube-system/w1: Rebooted".into())));
+        assert_eq!(get(&got, "last_warning_age"), Some(Value::Number(59.0)));
+    }
 }
