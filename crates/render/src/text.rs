@@ -9,7 +9,7 @@ static MEDIUM: LazyLock<fontdue::Font> = LazyLock::new(|| load(include_bytes!(".
 static BOLD: LazyLock<fontdue::Font> = LazyLock::new(|| load(include_bytes!("../fonts/Roboto-Bold.ttf")));
 
 type Glyph = Arc<(Metrics, Vec<u8>)>;
-type GlyphCache = Mutex<HashMap<(Font, char), Glyph>>;
+type GlyphCache = Mutex<HashMap<(Font, u32, char), Glyph>>;
 static GLYPHS: LazyLock<GlyphCache> = LazyLock::new(Default::default);
 
 fn load(bytes: &'static [u8]) -> fontdue::Font {
@@ -96,9 +96,12 @@ pub struct Style {
     pub align: Align,
 }
 
-fn glyph(font: Font, ch: char) -> Glyph {
+fn glyph(font: Font, scale: f32, ch: char) -> Glyph {
     let mut cache = GLYPHS.lock().expect("glyph cache poisoned");
-    cache.entry((font, ch)).or_insert_with(|| Arc::new(font.face().rasterize(ch, font.px()))).clone()
+    cache
+        .entry((font, scale.to_bits(), ch))
+        .or_insert_with(|| Arc::new(font.face().rasterize(ch, font.px() * scale)))
+        .clone()
 }
 
 fn advance(font: Font, s: &str) -> f32 {
@@ -109,7 +112,7 @@ fn advance(font: Font, s: &str) -> f32 {
         if let Some(p) = prev {
             pen += face.horizontal_kern(p, ch, font.px()).unwrap_or(0.0);
         }
-        pen += glyph(font, ch).0.advance_width;
+        pen += glyph(font, 1.0, ch).0.advance_width;
         prev = Some(ch);
     }
     pen
@@ -165,7 +168,7 @@ pub fn draw_text(pm: &mut Pixmap, x: i32, y: i32, style: &Style, s: &str, clip: 
         if let Some(p) = prev {
             pen += face.horizontal_kern(p, ch, font.px()).unwrap_or(0.0);
         }
-        let g = glyph(font, ch);
+        let g = glyph(font, 1.0, ch);
         let (m, bitmap) = (&g.0, &g.1);
         let gx = (pen + m.xmin as f32).round() as i32;
         let gy = (baseline - (m.height as i32 + m.ymin) as f32).round() as i32;
@@ -306,5 +309,13 @@ mod tests {
         let c = ColorU8::from_rgba(255, 0, 0, 255);
         draw_text(&mut pm, 2, 2, &Style { font: Font::Num, color: c, align: Align::Left }, "8", None);
         assert!(pm.pixels().iter().any(|p| p.red() == 255 && p.green() == 0));
+    }
+
+    #[test]
+    fn glyph_cache_keeps_sizes_apart() {
+        let one = glyph(Font::Mid, 1.0, 'M');
+        let two = glyph(Font::Mid, 2.0, 'M');
+        assert!(two.0.height > one.0.height, "{} vs {}", two.0.height, one.0.height);
+        assert!(two.0.advance_width > one.0.advance_width * 1.9);
     }
 }
