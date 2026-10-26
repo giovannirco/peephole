@@ -40,7 +40,8 @@ fn sensitive(value: &str) -> anyhow::Result<HeaderValue> {
 /// GET `url` and fail on any non-2xx status.
 pub(crate) async fn get(client: &reqwest::Client, url: reqwest::Url) -> anyhow::Result<reqwest::Response> {
     let path = url.path().to_owned();
-    let response = client.get(url).send().await.with_context(|| format!("GET {path}"))?;
+    let response =
+        client.get(url).send().await.map_err(reqwest::Error::without_url).with_context(|| format!("GET {path}"))?;
     let status = response.status();
     anyhow::ensure!(status.is_success(), "GET {path}: HTTP {status}");
     Ok(response)
@@ -71,6 +72,18 @@ mod tests {
         assert_eq!(join(&base, "/api/v1/query").as_str(), "http://mimir.example.invalid/prometheus/api/v1/query");
         let bare = base_url("http://prom.example.invalid").unwrap();
         assert_eq!(join(&bare, "api/v1/query").as_str(), "http://prom.example.invalid/api/v1/query");
+    }
+
+    #[tokio::test]
+    async fn request_errors_never_carry_the_url() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let client = client(Duration::from_secs(2), &BTreeMap::new(), None, false).unwrap();
+        let url = reqwest::Url::parse(&format!("http://127.0.0.1:{port}/api/stats?token=supersecret")).unwrap();
+        let err = format!("{:#}", get(&client, url).await.unwrap_err());
+        assert!(err.contains("GET /api/stats"), "{err}");
+        assert!(!err.contains("supersecret"), "{err}");
     }
 
     #[test]
