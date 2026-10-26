@@ -9,6 +9,7 @@ use peephole_core::config::PluginEntry;
 
 pub mod clock;
 pub mod demo;
+pub mod homepage;
 mod http;
 pub mod http_json;
 mod insecure_tls;
@@ -21,7 +22,7 @@ pub mod unifi_protect;
 
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect"]
+    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "homepage"]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
@@ -34,6 +35,7 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "prometheus" => make(entry, prometheus::Prometheus::new),
         "mempool" => make(entry, mempool::Mempool::new),
         "unifi_protect" => make(entry, unifi_protect::UnifiProtect::new),
+        "homepage" => make(entry, homepage::Homepage::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
 }
@@ -71,6 +73,7 @@ mod tests {
             "{kind: http_json, url: 'http://api.example.invalid', fields: []}",
             "{kind: mempool, url: 'https://mempool.example.invalid'}",
             "{kind: unifi_protect, url: 'https://nvr.example.invalid', api_key: k, event_page: Door}",
+            "{kind: homepage, url: 'https://home.example.invalid'}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
             assert_eq!(build(&entry(yaml)).unwrap().name(), *kind);
