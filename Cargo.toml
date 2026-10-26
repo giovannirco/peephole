@@ -17,7 +17,7 @@ serde_yaml = "0.9"
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "gzip"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "gzip", "cookies"] }
 async-trait = "0.1"
 futures = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
