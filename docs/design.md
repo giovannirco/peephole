@@ -9,7 +9,9 @@ Why not render on the board? The first version did (ESPHome lambdas drawing 13 p
 `plugin/key[/label]` → `Number | Text | Series | Image`, each with `updated_at`. Plugins write; the renderer reads. Stale values (older than `hub.stale_s`) draw grey with their age; missing values draw `--`.
 
 ## Pages
-A page is a list of cards in a 320×170 design space (configurable per page); a card is a rounded rectangle with an accent bar and a list of widgets bound to keys. The renderer draws at the design size and resamples to the size the device asked for. Per-size layouts are a later feature.
+A page is a list of cards in a 320×170 design space (configurable per page); a card is a rounded rectangle with an accent bar and a list of widgets bound to keys. The renderer lays every page out in that design space and delivers the size the device asked for. Per-size layouts are a later feature.
+
+Pages are drawn at a uniform scale of at least 1, integer or fractional (the smaller of requested width / design width and requested height / design height): every primitive takes design-space coordinates, paths and strokes go through the scale, glyphs are rasterized at the scaled font size, and text is still measured in design space, so the layout is the same at every size. A 2× or 3× frame (the browser view, the GitHub profile cards) is drawn sharp rather than upscaled; the boards ask for their native size and still get the 1× frame, pixel for pixel. Only a target smaller than the design, or one of another aspect, is resampled.
 
 ## Devices
 Registered on their first `GET /frame.png?id=…&w=…&h=…`. Each has a current page, a cycle period, a message line and an optional *hold* (a plugin event showing one page for N seconds). Buttons reset the cycle timer. State persists to a JSON file when `PEEPHOLE_STATE` is set.
