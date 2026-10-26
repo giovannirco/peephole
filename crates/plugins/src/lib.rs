@@ -9,6 +9,8 @@ use peephole_core::config::PluginEntry;
 
 pub mod clock;
 pub mod demo;
+pub mod homarr;
+pub mod homepage;
 mod http;
 pub mod http_json;
 mod insecure_tls;
@@ -23,7 +25,18 @@ pub mod unifi_protect;
 
 /// Names of the plugin kinds this build knows.
 pub fn kinds() -> &'static [&'static str] {
-    &["clock", "demo", "prometheus", "http_json", "mempool", "unifi_protect", "proxmox", "technitium"]
+    &[
+        "clock",
+        "demo",
+        "prometheus",
+        "http_json",
+        "mempool",
+        "unifi_protect",
+        "proxmox",
+        "technitium",
+        "homepage",
+        "homarr",
+    ]
 }
 
 /// Instantiate the plugin for `entry.kind` with `entry.settings()`.
@@ -38,6 +51,8 @@ pub fn build(entry: &PluginEntry) -> anyhow::Result<Arc<dyn Plugin>> {
         "unifi_protect" => make(entry, unifi_protect::UnifiProtect::new),
         "proxmox" => make(entry, proxmox::Proxmox::new),
         "technitium" => make(entry, technitium::Technitium::new),
+        "homepage" => make(entry, homepage::Homepage::new),
+        "homarr" => make(entry, homarr::Homarr::new),
         other => anyhow::bail!("plugin {:?}: unknown kind {other:?} (known: {})", entry.name(), kinds().join(", ")),
     }
 }
@@ -77,6 +92,8 @@ mod tests {
             "{kind: unifi_protect, url: 'https://nvr.example.invalid', api_key: k, event_page: Door}",
             "{kind: proxmox, hosts: [{name: a, url: 'https://pve-a.example.invalid:8006', token_id: 'u@pve!t', token_secret: s}]}",
             "{kind: technitium, url: 'http://dns.example.invalid:5380', token: t}",
+            "{kind: homepage, url: 'https://home.example.invalid'}",
+            "{kind: homarr, url: 'https://homarr.example.invalid', api_key: k}",
         ];
         for (yaml, kind) in minimal.iter().zip(kinds()) {
             assert_eq!(build(&entry(yaml)).unwrap().name(), *kind);
