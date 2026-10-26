@@ -21,7 +21,7 @@ Open http://localhost:8080/ : every page of `examples/demo.yaml`, refreshing eve
 
 ## Your own pages
 
-1. Copy `examples/homelab.yaml` (twenty-nine pages: Prometheus, a mempool API and sixteen direct plugins) or start from `examples/demo.yaml`.
+1. Copy `examples/homelab.yaml` (thirty pages: Prometheus, a mempool API and sixteen direct plugins) or start from `examples/demo.yaml`.
 2. Point the plugins at your sources with environment variables (`${PROMETHEUS_URL}`, `${MEMPOOL_URL}`, …). The hub refuses to start when one is missing.
 3. Run it: `PEEPHOLE_CONFIG=my.yaml peephole`.
 4. Flash a board from `https://<hub>/flash/` (Chrome or Edge; WebSerial needs HTTPS), give it Wi-Fi when asked, open the board's own page and set the hub URL.

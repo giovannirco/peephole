@@ -1,4 +1,4 @@
-# Peephole: a whole homelab on a 320x170 screen. Twenty-nine pages: thirteen fed by Prometheus
+# Peephole: a whole homelab on a 320x170 screen. Thirty pages: thirteen fed by Prometheus
 # (kube-state-metrics, node exporter, a Proxmox exporter, UnPoller, nvidia-smi, blackbox probes,
 # Velero, CloudNativePG, a Cloudflare exporter) and a mempool.space-compatible API, sixteen fed by
 # direct plugins (Proxmox, Kubernetes, UniFi Network, Uptime Kuma, CLIProxyAPI, Home Assistant,
@@ -117,7 +117,8 @@ plugins:
     name: k8s
     interval_s: 30
     clusters:
-      - {name: local, in_cluster: true}
+      - {name: cluster-a, in_cluster: true}
+      # more clusters: {name: cluster-b, url: "${K8S_B_URL}", token: "${K8S_B_TOKEN}", ca_pem: "${K8S_B_CA}"} (a read-only ServiceAccount each; RBAC in docs/kubernetes-rbac.yaml)
 
   - kind: unifi_network
     name: net
@@ -491,37 +492,50 @@ pages:
     cards:
       - {x: 6, y: 24, w: 100, h: 66, accent: web, widgets: [
           {kind: text, x: 8, y: 4, text: nodes ready, font: small, color: text2},
-          {kind: text, x: 8, y: 20, text: "{{k8s/local/nodes_ready|int}} / {{k8s/local/nodes_total|int}}", font: num},
-          {kind: text, x: 8, y: 48, text: "{{k8s/local/version}}", font: small, color: text2}]}
+          {kind: text, x: 8, y: 20, text: "{{k8s/cluster-a/nodes_ready|int}} / {{k8s/cluster-a/nodes_total|int}}", font: num},
+          {kind: text, x: 8, y: 48, text: "{{k8s/cluster-a/version}}", font: small, color: text2}]}
       - {x: 110, y: 24, w: 100, h: 66, accent: web, widgets: [
-          {kind: gauge, x: 26, y: 50, r: 15, bind: k8s/local/cpu, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
-          {kind: gauge, x: 70, y: 50, r: 15, bind: k8s/local/mem, label: mem, color: web, thresholds: {warn: 0.85, bad: 0.95}}]}
+          {kind: gauge, x: 26, y: 50, r: 15, bind: k8s/cluster-a/cpu, label: cpu, color: web, thresholds: {warn: 0.8, bad: 0.9}},
+          {kind: gauge, x: 70, y: 50, r: 15, bind: k8s/cluster-a/mem, label: mem, color: web, thresholds: {warn: 0.85, bad: 0.95}}]}
       - {x: 214, y: 24, w: 100, h: 66, accent: web, widgets: [
-          {kind: kpi, x: 8, y: 4, bind: k8s/local/pods_running, label: pods running, fmt: int, color: web},
-          {kind: kpi, x: 8, y: 36, bind: k8s/local/pods_bad, label: not running, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 5}}]}
+          {kind: kpi, x: 8, y: 4, bind: k8s/cluster-a/pods_running, label: pods running, fmt: int, color: web},
+          {kind: kpi, x: 8, y: 36, bind: k8s/cluster-a/pods_bad, label: not running, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 5}}]}
       - {x: 6, y: 96, w: 308, h: 68, accent: web, widgets: [
-          {kind: kpi, x: 8, y: 4, bind: k8s/local/restarts, label: restarts, fmt: auto, size: mid},
-          {kind: kpi, x: 80, y: 4, bind: k8s/local/warnings_1h, label: warnings 1h, fmt: int, size: mid, thresholds: {warn: 5, bad: 30}},
-          {kind: kpi, x: 170, y: 4, bind: k8s/local/pvc_bound, label: volumes bound, fmt: int, size: mid},
-          {kind: kpi, x: 250, y: 4, bind: k8s/local/namespaces, label: namespaces, fmt: int, size: mid},
-          {kind: ticker, x: 8, y: 44, w: 292, bind: k8s/local/last_warning, color: text2}]}
+          {kind: kpi, x: 8, y: 4, bind: k8s/cluster-a/restarts, label: restarts, fmt: auto, size: mid},
+          {kind: kpi, x: 80, y: 4, bind: k8s/cluster-a/warnings_1h, label: warnings 1h, fmt: int, size: mid, thresholds: {warn: 5, bad: 30}},
+          {kind: kpi, x: 170, y: 4, bind: k8s/cluster-a/pvc_bound, label: volumes bound, fmt: int, size: mid},
+          {kind: kpi, x: 250, y: 4, bind: k8s/cluster-a/namespaces, label: namespaces, fmt: int, size: mid},
+          {kind: ticker, x: 8, y: 44, w: 292, bind: k8s/cluster-a/last_warning, color: text2}]}
+
+  - name: fleet
+    title: Kubernetes · six clusters
+    cards:
+      - {x: 6, y: 24, w: 308, h: 140, accent: web, widgets: [
+          {kind: text, x: 100, y: 2, text: nodes, font: small, color: text2},
+          {kind: text, x: 140, y: 2, text: pods, font: small, color: text2},
+          {kind: text, x: 186, y: 2, text: argo, font: small, color: text2},
+          {kind: text, x: 232, y: 2, text: flux, font: small, color: text2},
+          {kind: text, x: 270, y: 2, text: warn, font: small, color: text2},
+          {kind: rows, x: 8, y: 16, w: 292, row_h: 19,
+           items: [{key: cluster-a}, {key: cluster-b}, {key: cluster-c}, {key: cluster-d}, {key: cluster-e}, {key: cluster-f}],
+           cols: [{kind: name, w: 74}, {kind: led, bind: "k8s/{}/pods_bad", thresholds: {warn: 0.5, bad: 5}}, {kind: num, bind: "k8s/{}/nodes_ready", w: 40, fmt: int}, {kind: num, bind: "k8s/{}/pods_running", w: 46, fmt: int}, {kind: num, bind: "k8s/{}/argo_outofsync", w: 46, fmt: int, thresholds: {warn: 0.5, bad: 3}}, {kind: num, bind: "k8s/{}/flux_notready", w: 40, fmt: int, thresholds: {warn: 0.5, bad: 3}}, {kind: num, bind: "k8s/{}/warnings_1h", w: 40, fmt: int, thresholds: {warn: 5, bad: 30}}]}]}
 
   - name: gitops
     title: GitOps
     cards:
       - {x: 6, y: 24, w: 152, h: 70, accent: ok, title: argo cd, widgets: [
-          {kind: text, x: 8, y: 18, text: "{{k8s/local/argo_synced|int}}/{{k8s/local/argo_apps|int}} synced", font: mid},
-          {kind: text, x: 8, y: 38, text: "{{k8s/local/argo_healthy|int}} healthy", font: small, color: text2},
-          {kind: kpi, x: 104, y: 16, bind: k8s/local/argo_degraded, label: degraded, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
+          {kind: text, x: 8, y: 18, text: "{{k8s/cluster-a/argo_synced|int}}/{{k8s/cluster-a/argo_apps|int}} synced", font: mid},
+          {kind: text, x: 8, y: 38, text: "{{k8s/cluster-a/argo_healthy|int}} healthy", font: small, color: text2},
+          {kind: kpi, x: 104, y: 16, bind: k8s/cluster-a/argo_degraded, label: degraded, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
       - {x: 162, y: 24, w: 152, h: 70, accent: ok, title: flux, widgets: [
-          {kind: text, x: 8, y: 18, text: "{{k8s/local/flux_ready|int}}/{{k8s/local/flux_total|int}} ready", font: mid},
-          {kind: kpi, x: 104, y: 16, bind: k8s/local/flux_notready, label: not ready, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
+          {kind: text, x: 8, y: 18, text: "{{k8s/cluster-a/flux_ready|int}}/{{k8s/cluster-a/flux_total|int}} ready", font: mid},
+          {kind: kpi, x: 104, y: 16, bind: k8s/cluster-a/flux_notready, label: not ready, fmt: int, size: mid, thresholds: {warn: 0.5, bad: 3}}]}
       - {x: 6, y: 100, w: 152, h: 64, accent: ok, title: certificates, widgets: [
-          {kind: kpi, x: 8, y: 16, bind: k8s/local/cert_min_days, label: soonest expiry, unit: d, fmt: int, size: mid, thresholds: {warn: 20, bad: 7, invert: true}},
-          {kind: text, x: 8, y: 46, text: "{{k8s/local/cert_soonest}}", font: small, color: text2}]}
+          {kind: kpi, x: 8, y: 16, bind: k8s/cluster-a/cert_min_days, label: soonest expiry, unit: d, fmt: int, size: mid, thresholds: {warn: 20, bad: 7, invert: true}},
+          {kind: text, x: 8, y: 46, text: "{{k8s/cluster-a/cert_soonest}}", font: small, color: text2}]}
       - {x: 162, y: 100, w: 152, h: 64, accent: bad, title: attention, widgets: [
-          {kind: ticker, x: 8, y: 18, w: 136, bind: k8s/local/argo_worst, color: warn},
-          {kind: ticker, x: 8, y: 38, w: 136, bind: k8s/local/flux_worst, color: warn}]}
+          {kind: ticker, x: 8, y: 18, w: 136, bind: k8s/cluster-a/argo_worst, color: warn},
+          {kind: ticker, x: 8, y: 38, w: 136, bind: k8s/cluster-a/flux_worst, color: warn}]}
 
   - name: unifi
     title: UniFi · direct
