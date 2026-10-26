@@ -52,6 +52,25 @@ Most sources are already covered by two generic plugins:
   fields:
     - {key: temp, pointer: /current/temp_c}
     - {key: sky, pointer: /current/condition/text, kind: text}
+    - {key: rain_1h, pointer: /hourly, kind: series, element: /rain_mm, last: 24}
+- kind: http_json
+  name: lab
+  url: https://orrery.example.com/api/insight/proxmox
+  items:
+    - pointer: /hosts
+      key: /name
+      prefix: host
+      fields:
+        - {key: cpu, pointer: /cpu}
+        - {key: mem, pointer: /memoryUsed, over: /memoryTotal}
+      count:
+        - {key: up, pointer: /up, equals: true}
 ```
+
+`http_json` field kinds: `number` (a boolean reads as 1/0), `text`, and `series` (a JSON array; `element` points into
+each entry, e.g. `/1` for `[ts, value]` pairs; non-numbers become gaps; `last: N` keeps the tail). `over` divides two
+pointers (0 when the divisor is 0), at the top level or in `items`. `items` reads one entry per array element as
+`<prefix>/<label>/<key>`, plus `<prefix>_count` and one `<prefix>_<key>` per `count`; labels and keys have `/` and
+spaces turned into `-`.
 
 A recipe PR = the YAML page(s), the plugin entry, and a screenshot from the hub (`/pages/<name>.png?w=640&h=340`).
