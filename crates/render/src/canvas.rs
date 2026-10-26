@@ -184,11 +184,11 @@ impl Canvas {
     }
 
     pub fn text(&mut self, x: i32, y: i32, font: Font, color: ColorU8, align: Align, s: &str) {
-        text::draw_text(&mut self.pixmap, x, y, &Style { font, color, align }, s, None);
+        text::draw_text(&mut self.pixmap, x, y, &Style { font, color, align }, s, None, self.scale);
     }
 
     pub fn text_clipped(&mut self, x: i32, y: i32, style: &Style, s: &str, clip: IntRect) {
-        text::draw_text(&mut self.pixmap, x, y, style, s, Some(clip));
+        text::draw_text(&mut self.pixmap, x, y, style, s, Some(clip), self.scale);
     }
 }
 
