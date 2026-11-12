@@ -13,11 +13,11 @@ An ESP32 cannot load code at runtime and should not hold the credentials of your
 ## Try it in two minutes
 
 ```bash
-PEEPHOLE_DEMO=1 cargo run -p peephole-hub --release
+PEEPHOLE_DEMO=1 cargo run --locked -p peephole-hub --release
 # or
 docker run --rm -p 8080:8080 -e PEEPHOLE_DEMO=1 ghcr.io/giovannirco/peephole:latest
 ```
-Open http://localhost:8080/ : every page of `examples/demo.yaml`, refreshing every five seconds.
+Open http://localhost:8080/ : every page of `examples/demo.yaml`, refreshing every five seconds. Source builds need stable Rust; use the checked-in lockfile. For an existing installation, pin an image digest instead of the moving `latest` demo tag and preserve the file named by `PEEPHOLE_STATE`.
 
 ## Your own pages
 
@@ -106,7 +106,7 @@ Writing one is a Rust trait with two methods; see [docs/plugins.md](docs/plugins
 
 ## Firmware
 
-`firmware/esphome/` holds one ESPHome configuration per board. CI compiles them into factory images that the hub serves on `/flash/`. The firmware carries no credentials: Wi-Fi comes over Improv during flashing, the hub URL is a setting on the board's web page. See [firmware/esphome/README.md](firmware/esphome/README.md).
+`firmware/esphome/` holds one ESPHome configuration per board. CI compiles them into factory images; make those artifacts available in `PEEPHOLE_FIRMWARE_DIR` for the hub to serve them on `/flash/`. A working hub does not by itself establish that firmware artifacts are installed. The firmware carries no credentials: Wi-Fi comes over Improv during flashing, the hub URL is a setting on the board's web page. See [firmware/esphome/README.md](firmware/esphome/README.md).
 
 ## Design
 
